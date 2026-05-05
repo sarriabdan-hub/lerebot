@@ -41,8 +41,6 @@ git clone https://github.com/sarriabdan-hub/lerebot.git
 cd lerebot
 ```
 
-> **Note:** If GitHub asks for authentication, use the username `sarriabdan-hub` and a GitHub personal access token instead of your account password.
-
 ## 4. Create a clean Conda environment
 
 ```bash
