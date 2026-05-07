@@ -113,6 +113,23 @@ Before starting calibration:
 - Move every motor through its full range of motion during calibration.
 - Then repeat the process for the **follower** arm.
 
+## 10. Directly running (if setup was already done)
+
+```bash
+conda activate lerobot
+
+ls /dev/ttyACM*
+sudo chmod 666 /dev/ttyACM*
+
+lerobot-teleoperate \
+  --robot.type=so101_follower \
+  --robot.port=/dev/ttyACM0 \
+  --robot.id=so_follower \
+  --teleop.type=so101_leader \
+  --teleop.port=/dev/ttyACM1 \
+  --teleop.id=so_leader
+```
+
 ## Troubleshooting
 
 | Problem | Solution |
