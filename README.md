@@ -116,6 +116,7 @@ Before starting calibration:
 ## 10. Directly running (if setup was already done)
 
 ```bash
+cd ~/lerobot
 conda activate lerobot
 
 ls /dev/ttyACM*
