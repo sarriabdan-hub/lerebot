@@ -131,6 +131,55 @@ lerobot-teleoperate \
   --teleop.id=so_leader
 ```
 
+## 11. Start Recording
+
+Run this command to start a recording session.
+
+- Episodes: 10
+- Duration: 100 minutes (6000s) per episode
+- Viewer: Live "Rerun" viewer enabled
+
+```bash
+conda activate lerobot
+
+# Grant permissions to USB devices
+sudo chmod 666 /dev/ttyACM*
+sudo chmod 666 /dev/video*
+lerobot-record \
+  --robot.type=so101_follower \
+  --robot.port=/dev/ttyACM0 \
+  --robot.id=so_follower \
+  --robot.cameras='{ 
+    "cam_high": {"type": "intelrealsense", "serial_number_or_name": "338522302134", "fps": 30, "width": 640, "height": 480},
+    "cam_low": {"type": "intelrealsense", "serial_number_or_name": "052622071016", "fps": 30, "width": 640, "height": 480}
+  }' \
+  --teleop.type=so101_leader \
+  --teleop.port=/dev/ttyACM1 \
+  --teleop.id=so_leader \
+  --dataset.repo_id=robot_v1/collection_session \
+  --dataset.single_task="Perform the task" \
+  --dataset.num_episodes=10 \
+  --dataset.episode_time_s=6000 \
+  --dataset.reset_time_s=5 \
+  --dataset.root=~/my_local_data \
+  --dataset.push_to_hub=False \
+  --display_data True
+```
+
+> **Note:** You must click on the terminal and press Enter to start each episode.
+
+## 12. Visualize Data
+
+To watch the recorded episodes and see the joint graphs:
+
+```bash
+# Change --episode-index to see different recordings
+lerobot-dataset-viz \
+  --repo-id robot_v1/collection_session \
+  --root ~/my_local_data \
+  --episode-index 0
+```
+
 ## Troubleshooting
 
 | Problem | Solution |
