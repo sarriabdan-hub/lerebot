@@ -148,24 +148,25 @@ conda activate lerobot
 sudo chmod 666 /dev/ttyACM*
 sudo chmod 666 /dev/video*
 lerobot-record \
-  --robot.type=so101_follower \
-  --robot.port=/dev/ttyACM0 \
-  --robot.id=so_follower \
-  --robot.cameras='{ 
-    "cam_high": {"type": "intelrealsense", "serial_number_or_name": "338522302134", "fps": 30, "width": 640, "height": 480},
-    "cam_low": {"type": "intelrealsense", "serial_number_or_name": "052622071016", "fps": 30, "width": 640, "height": 480}
-  }' \
-  --teleop.type=so101_leader \
-  --teleop.port=/dev/ttyACM1 \
-  --teleop.id=so_leader \
-  --dataset.repo_id=robot_v1/collection_session \
-  --dataset.single_task="Perform the task" \
-  --dataset.num_episodes=10 \
-  --dataset.episode_time_s=6000 \
-  --dataset.reset_time_s=5 \
-  --dataset.root=~/my_local_data \
-  --dataset.push_to_hub=False \
-  --display_data True
+    --robot.type=so101_follower \
+    --robot.port=/dev/ttyACM0 \
+    --robot.id=so_follower \
+    --robot.calibration_dir=/home/robot/dev/lerebot/calibration/robots/so_follower \
+    --robot.cameras='{"cam_high": {"type": "intelrealsense", "serial_number_or_name": "338522302134", "fps": 30, "width": 640, 
+  "height": 480}, "cam_low": {"type": "intelrealsense", "serial_number_or_name": "052622071016", "fps": 30, "width": 640, "height": 
+  480}}' \
+    --teleop.type=so101_leader \
+    --teleop.port=/dev/ttyACM1 \
+    --teleop.id=so_leader \
+    --teleop.calibration_dir=/home/robot/dev/lerebot/calibration/teleoperators/so_leader \
+    --dataset.repo_id=robot_v1/collection_session \
+    --dataset.single_task="Perform the task" \
+    --dataset.num_episodes=10 \
+    --dataset.episode_time_s=6000 \
+    --dataset.reset_time_s=5 \
+    --dataset.root=~/my_local_data \
+    --dataset.push_to_hub=False \
+    --display_data True
 ```
 
 > **Note:** You must click on the terminal and press Enter to start each episode.
