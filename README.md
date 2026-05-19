@@ -93,12 +93,14 @@ sudo chmod 666 /dev/ttyACM*
 
 ```bash
 lerobot-teleoperate \
-  --robot.type=so101_follower \
-  --robot.port=/dev/ttyACM0 \
-  --robot.id=so_follower \
-  --teleop.type=so101_leader \
-  --teleop.port=/dev/ttyACM1 \
-  --teleop.id=so_leader
+    --robot.type=so101_follower \
+    --robot.port=/dev/ttyACM0 \
+    --robot.id=so_follower \
+    --robot.calibration_dir=/home/robot/dev/lerebot/calibration/robots/so_follower \
+    --teleop.type=so101_leader \
+    --teleop.port=/dev/ttyACM1 \
+    --teleop.id=so_leader \
+    --teleop.calibration_dir=/home/robot/dev/lerebot/calibration/teleoperators/so_leader
 ```
 
 > **Note:** The port assignments may be reversed. If the command does not work, swap `/dev/ttyACM0` and `/dev/ttyACM1` in the command above.
