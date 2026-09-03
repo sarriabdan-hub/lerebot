@@ -176,3 +176,10 @@ outputs/
 *.urdf
 *.xml
 *.part
+
+# --- excluded from GitHub: too large / generated / personal ---
+ee/robometer/
+ee/robometer_3feed/
+ee/robometer_runs/
+unsloth_compiled_cache/
+.claude/
