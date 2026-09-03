@@ -1,0 +1,38 @@
+<mxfile host="app.diagrams.net" type="device">
+  <diagram id="arch" name="System Architecture">
+    <mxGraphModel dx="900" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="560" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="op" value="Operator" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="240" width="40" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="panel" value="Control Panel (Workstation)&#10;cv_run.py&#10;live feeds &#183; path overlay &#183; CV slot-reader&#10;Home / Execute" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="130" y="220" width="250" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="thor" value="NVIDIA Jetson Thor" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;dashed=1;fillColor=none;strokeColor=#666666;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="470" y="50" width="390" height="470" as="geometry"/>
+        </mxCell>
+        <mxCell id="server" value="VLA Inference Server&#10;vla_server.py&#10;HTTP: /execute /home /observe /state /stop" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="500" y="90" width="330" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="policy" value="&#960;0.5 Policy&#10;(action expert)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="500" y="230" width="150" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="cams" value="Cameras&#10;top / wrist / side" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="680" y="230" width="150" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="arm" value="SO-101 Arm (6-DOF)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="590" y="390" width="200" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="op" target="panel"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" value="position command (HTTP)" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" parent="1" source="panel" target="server"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" value="live feeds (/observe)" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;dashed=1;" edge="1" parent="1" source="server" target="panel"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" value="observation" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" parent="1" source="server" target="policy"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" value="action chunk" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" parent="1" source="policy" target="server"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" value="RGB frames" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" parent="1" source="cams" target="server"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" value="joint targets &#183; 30 Hz" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" parent="1" source="server" target="arm"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

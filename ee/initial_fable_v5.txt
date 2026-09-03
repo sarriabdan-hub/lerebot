@@ -1,0 +1,416 @@
+====================================================================================================
+ INITIAL FABLE v5 — PILOT RECORDING SHEET  (200 episodes, 40 runs x 5, 8 sessions of 25)
+ Purpose: DEPTH-FIRST pilot — 2 slot destinations + BIN, ~65-70 eps EACH: enough data per
+ destination to truly TEST color grounding, bin drops, and prompt-following before Phase B.
+ before the full Phase-B recording. Generated with seed=42 (reproducible).
+====================================================================================================
+
+PHYSICAL LAYOUT (fixed for the WHOLE pilot — do not move anything between sessions)
+----------------------------------------------------------------------------------------------------
+- The two racks sit SIDE BY SIDE in front of the arm, PERPENDICULAR to it, with a GAP
+  between them. The ARM is centered BEHIND that middle gap.
+- LEFT rack = the rack on the arm's left; RIGHT rack = on its right. Slots 1..6 numbered
+  the same way as v4 (keep your existing convention; mark slot 1 with tape if unsure).
+- The BIN sits at the SIDE (pick left or right once, mark its floor position with tape,
+  never move it during the pilot).
+- Cameras: SAME pose as v4 (run the alignment check vs reference frames first).
+  Racks: mark their footprint with tape too — they must not drift between sessions.
+
+COLORS (4 chosen for maximum visual separation)
+----------------------------------------------------------------------------------------------------
+  USE:   RED, CYAN, DARK-GREEN, LIGHT-PURPLE
+  DO NOT USE: light pink (confusable with red), yellow (swapped out per Sari 2026-07-05).
+  The starred vial (e.g. 4:YELLOW*) is the TARGET the prompt names. Distractor vials are
+  NEVER the same color as the target (no ambiguity), duplicates among distractors are fine.
+
+RULES (every episode)
+----------------------------------------------------------------------------------------------------
+ 1. Set the scene EXACTLY as the episode line says: LEFT[slot:color,...] RIGHT[slot:color,...].
+ 2. HOME the arm before every episode (this is policy — initial-state robustness).
+ 3. Teleop: grasp the STARRED vial -> place it at the stated destination (slot or bin).
+    Slot placements: full insertion. Bin: release above the bin opening.
+ 4. -> saves the episode, <- redoes it. Redo any sloppy grasp/placement — quality > speed.
+ 5. Between EPISODES within a run only the vials move (scene reset per the sheet).
+ 6. Between RUNS the label changes -> new CLI invocation with --resume=true.
+ 7. After each SESSION (5 runs = 25 eps): run
+       .venv/bin/python ee/audit_labels.py --root <dataset> --group
+    on the WS to catch label mistakes SAME DAY.
+ 8. Sources use anchor slots 1,3,4,6 only (2 and 5 are held out on purpose — the
+    policy interpolates them; we verify that at eval).
+
+CLI PATTERN (one run = one label = 5 episodes; runs come from the sheet below)
+----------------------------------------------------------------------------------------------------
+  # CAMERAS = the exact v4 JSON (MJPG + RS-first fixes) + DEPTH enabled on the D435i
+  # (cam_depth per ee/DEPTH_PLAN.md — recorded as a colorized 4th stream).
+  export CAMS='{"cam_top": {"type": "opencv", "index_or_path": "/dev/v4l/by-path/platform-a80aa10000.usb-usb-0:4.2.2:1.0-video-index0", "fps": 30, "width": 640, "height": 480, "fourcc": "MJPG"}, "cam_wrist": {"type": "opencv", "index_or_path": "/dev/v4l/by-path/platform-a80aa10000.usb-usb-0:4.2.4:1.0-video-index0", "fps": 30, "width": 640, "height": 480, "fourcc": "MJPG"}, "cam_side": {"type": "intelrealsense", "serial_number_or_name": "052622071016", "fps": 30, "width": 640, "height": 480, "warmup_s": 3, "use_depth": true}}'
+
+  # DEPTH PRE-FLIGHT (once, BEFORE run 1 — both must pass or record WITHOUT depth):
+  #  a) PATCH Thor's lerobot first: use_depth=true alone records NOTHING extra —
+  #     stock so_follower.get_observation() only reads the color frame. Apply the
+  #     small get_observation/_cameras_ft patch from ee/DEPTH_PLAN.md §"Thor patch"
+  #     (adds the colorized `cam_depth` obs key). Verify: a 2-episode throwaway
+  #     recording must contain videos/observation.images.cam_depth/.
+  #  b) BANDWIDTH BENCH: 60 s teleop with all 4 streams on, zero frame-drop warnings
+  #     (depth z16 adds ~18 MB/s on the same D435i that had the USB starvation saga;
+  #     check the port first — PLAN_FABLE §1 command; must be USB 3.x / 5000M).
+
+  # RUN 1 creates the dataset; every later run appends with --resume=true
+  lerobot-record \
+    --robot.type=so101_follower --robot.port=/dev/ttyACM0 --robot.id=so_follower \
+    --robot.calibration_dir=/home/robot/dev/lerebot/calibration/robots/so_follower \
+    --robot.cameras="$CAMS" \
+    --teleop.type=so101_leader --teleop.port=/dev/ttyACM1 --teleop.id=so_leader \
+    --teleop.calibration_dir=/home/robot/dev/lerebot/calibration/teleoperators/so_leader \
+    --dataset.repo_id=sari-abdan/vial-sort-v5-pilot --dataset.root=/home/robot/my_local_data_v5 \
+    --dataset.num_episodes=5 \
+    --dataset.single_task="<the run's label from the sheet>" \
+    --resume=true   # OMIT on run 1 only
+  # afterwards on WS: convert joint->EE (cam_depth rides along as a normal video key),
+  # paraphrase_tasks.py, then train per PLAN_FABLE. Depth A/B = one extra train run
+  # WITHOUT the cam_depth key (see DEPTH_PLAN.md §2 step 4).
+
+VIAL-COUNT DICE (already rolled into the sheet): 40% 4-vial, 30% 3, 20% 2, 10% 1 scenes.
+====================================================================================================
+HOW TO READ AN EPISODE LINE
+----------------------------------------------------------------------------------------------------
+  ep 003 | L: P* G  C  .  .  R  | R: .  .  .  .  .  .  | -> BIN
+  Six columns per rack = slots 1..6.   . = empty slot.
+  Letters: R=RED  C=CYAN  G=DARK-GREEN  P=LIGHT-PURPLE.
+  The * marks the TARGET vial (the one the run's prompt names) — grasp that one.
+  '-> BIN' / '-> LEFT pos N' / '-> RIGHT pos N' = where to place it.
+  Episode numbers are 0-indexed and match lerobot's episode_index (audit_labels.py).
+
+EPISODE SCHEDULE
+
+======================================================================================
+  SESSION 1/8  (eps 0-24)   >> re-check camera alignment, tape marks, HOME <<
+======================================================================================
+
+RUN 01/40   "Put the light purple vial in the bin."
+  ep 000 | L: C  .  .  .  .  .  | R: .  G  R  .  .  P* | -> BIN
+  ep 001 | L: .  .  .  P* .  .  | R: G  .  .  .  G  C  | -> BIN
+  ep 002 | L: .  .  .  G  .  .  | R: .  G  P* .  .  .  | -> BIN
+  ep 003 | L: P* G  C  .  .  R  | R: .  .  .  .  .  .  | -> BIN
+  ep 004 | L: R  R  .  .  .  .  | R: P* .  G  .  .  .  | -> BIN
+
+RUN 02/40   "Place the cyan vial in position 3 of the right rack."
+  ep 005 | L: .  .  .  C* P  .  | R: .  .  .  R  .  .  | -> RIGHT pos 3
+  ep 006 | L: G  .  .  .  P  C* | R: .  .  .  G  .  .  | -> RIGHT pos 3
+  ep 007 | L: .  .  C* .  .  .  | R: .  .  .  R  .  .  | -> RIGHT pos 3
+  ep 008 | L: C* .  .  G  G  .  | R: .  .  .  .  .  G  | -> RIGHT pos 3
+  ep 009 | L: .  .  C* .  .  .  | R: .  .  .  R  .  .  | -> RIGHT pos 3
+
+RUN 03/40   "Put the dark green vial in the bin."
+  ep 010 | L: .  .  .  .  .  .  | R: .  .  .  R  .  G* | -> BIN
+  ep 011 | L: C  .  G* .  P  .  | R: .  .  C  .  .  .  | -> BIN
+  ep 012 | L: C  C  .  .  .  .  | R: .  .  .  G* .  .  | -> BIN
+  ep 013 | L: R  .  .  G* .  P  | R: .  .  .  .  .  .  | -> BIN
+  ep 014 | L: .  .  .  R  R  .  | R: G* .  .  .  .  .  | -> BIN
+
+RUN 04/40   "Place the light purple vial in position 3 of the right rack."
+  ep 015 | L: .  .  P* .  .  .  | R: R  .  .  .  .  .  | -> RIGHT pos 3
+  ep 016 | L: .  .  .  P* .  .  | R: .  .  .  .  C  .  | -> RIGHT pos 3
+  ep 017 | L: R  G  P* .  .  .  | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 018 | L: P* .  C  .  .  .  | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 019 | L: .  R  .  .  .  P* | R: C  .  .  .  .  .  | -> RIGHT pos 3
+
+RUN 05/40   "Put the dark green vial in the bin."
+  ep 020 | L: .  .  C  .  .  C  | R: .  .  .  .  .  G* | -> BIN
+  ep 021 | L: .  .  .  .  C  .  | R: .  .  .  G* .  .  | -> BIN
+  ep 022 | L: .  R  .  .  .  P  | R: .  .  G* .  .  .  | -> BIN
+  ep 023 | L: .  .  .  .  .  C  | R: G* .  .  C  .  C  | -> BIN
+  ep 024 | L: .  .  .  .  .  R  | R: .  .  G* .  .  .  | -> BIN
+
+======================================================================================
+  SESSION 2/8  (eps 25-49)   >> re-check camera alignment, tape marks, HOME <<
+======================================================================================
+
+RUN 06/40   "Place the cyan vial in position 1 of the left rack."
+  ep 025 | L: .  G  .  .  .  .  | R: .  .  .  R  .  C* | -> LEFT pos 1
+  ep 026 | L: .  .  .  G  .  .  | R: .  .  P  C* R  .  | -> LEFT pos 1
+  ep 027 | L: .  .  .  .  .  .  | R: C* R  .  .  .  .  | -> LEFT pos 1
+  ep 028 | L: .  .  .  .  .  .  | R: .  .  C* .  .  P  | -> LEFT pos 1
+  ep 029 | L: .  G  .  .  .  .  | R: C* R  .  .  .  .  | -> LEFT pos 1
+
+RUN 07/40   "Put the light purple vial in the bin."
+  ep 030 | L: G  R  .  .  .  .  | R: P* .  .  G  .  .  | -> BIN
+  ep 031 | L: C  C  R  .  .  P* | R: .  .  .  .  .  .  | -> BIN
+  ep 032 | L: C  C  .  P* .  .  | R: .  C  .  .  .  .  | -> BIN
+  ep 033 | L: R  .  .  .  C  P* | R: .  .  .  .  R  .  | -> BIN
+  ep 034 | L: .  G  P* .  R  .  | R: .  .  .  .  .  C  | -> BIN
+
+RUN 08/40   "Place the dark green vial in position 1 of the left rack."
+  ep 035 | L: .  .  .  .  .  .  | R: G* R  .  .  .  P  | -> LEFT pos 1
+  ep 036 | L: .  .  P  .  .  .  | R: C  .  .  .  .  G* | -> LEFT pos 1
+  ep 037 | L: .  P  .  .  .  P  | R: .  .  G* .  .  .  | -> LEFT pos 1
+  ep 038 | L: .  .  .  R  .  .  | R: .  C  .  G* R  .  | -> LEFT pos 1
+  ep 039 | L: .  .  .  .  .  .  | R: G* P  R  .  .  .  | -> LEFT pos 1
+
+RUN 09/40   "Put the cyan vial in the bin."
+  ep 040 | L: .  .  C* .  G  .  | R: .  .  P  .  .  .  | -> BIN
+  ep 041 | L: .  .  G  .  .  .  | R: C* P  .  .  .  .  | -> BIN
+  ep 042 | L: .  .  P  .  .  C* | R: G  R  .  .  .  .  | -> BIN
+  ep 043 | L: .  .  .  .  G  .  | R: .  .  C* .  P  .  | -> BIN
+  ep 044 | L: .  R  .  P  .  .  | R: .  .  .  C* .  P  | -> BIN
+
+RUN 10/40   "Place the light purple vial in position 3 of the right rack."
+  ep 045 | L: .  .  .  P* .  .  | R: C  .  .  .  G  .  | -> RIGHT pos 3
+  ep 046 | L: .  R  P* .  .  .  | R: R  C  .  .  .  .  | -> RIGHT pos 3
+  ep 047 | L: R  .  .  .  .  P* | R: .  C  .  .  .  .  | -> RIGHT pos 3
+  ep 048 | L: P* .  .  .  .  C  | R: R  .  .  .  .  .  | -> RIGHT pos 3
+  ep 049 | L: C  .  .  .  .  P* | R: .  .  .  .  .  .  | -> RIGHT pos 3
+
+======================================================================================
+  SESSION 3/8  (eps 50-74)   >> re-check camera alignment, tape marks, HOME <<
+======================================================================================
+
+RUN 11/40   "Place the red vial in position 1 of the left rack."
+  ep 050 | L: .  .  G  C  .  .  | R: R* .  .  .  C  .  | -> LEFT pos 1
+  ep 051 | L: .  .  .  P  .  .  | R: .  .  G  .  .  R* | -> LEFT pos 1
+  ep 052 | L: .  .  .  .  .  .  | R: .  .  .  R* .  .  | -> LEFT pos 1
+  ep 053 | L: .  .  .  .  .  .  | R: .  .  .  R* .  .  | -> LEFT pos 1
+  ep 054 | L: .  .  .  .  .  C  | R: .  G  R* .  .  .  | -> LEFT pos 1
+
+RUN 12/40   "Put the light purple vial in the bin."
+  ep 055 | L: C  .  .  .  .  .  | R: .  .  P* R  .  .  | -> BIN
+  ep 056 | L: .  .  C  G  .  .  | R: .  .  .  P* .  .  | -> BIN
+  ep 057 | L: .  .  C  .  .  .  | R: P* .  .  .  G  .  | -> BIN
+  ep 058 | L: .  R  G  .  .  .  | R: .  .  .  C  .  P* | -> BIN
+  ep 059 | L: .  .  .  P* .  C  | R: .  .  .  R  .  .  | -> BIN
+
+RUN 13/40   "Place the dark green vial in position 3 of the right rack."
+  ep 060 | L: R  .  .  G* .  .  | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 061 | L: .  .  .  G* .  R  | R: .  .  .  .  .  C  | -> RIGHT pos 3
+  ep 062 | L: G* .  C  .  .  .  | R: .  .  .  .  R  .  | -> RIGHT pos 3
+  ep 063 | L: .  R  G* .  .  .  | R: .  R  .  .  .  .  | -> RIGHT pos 3
+  ep 064 | L: .  .  P  P  .  G* | R: C  .  .  .  .  .  | -> RIGHT pos 3
+
+RUN 14/40   "Place the cyan vial in position 1 of the left rack."
+  ep 065 | L: .  .  .  .  .  .  | R: .  .  .  C* R  .  | -> LEFT pos 1
+  ep 066 | L: .  .  .  .  .  R  | R: C* .  .  .  .  .  | -> LEFT pos 1
+  ep 067 | L: .  .  .  .  R  .  | R: .  .  P  .  .  C* | -> LEFT pos 1
+  ep 068 | L: .  .  .  R  .  .  | R: .  .  C* G  P  .  | -> LEFT pos 1
+  ep 069 | L: .  .  .  .  .  G  | R: .  .  .  .  .  C* | -> LEFT pos 1
+
+RUN 15/40   "Place the red vial in position 3 of the right rack."
+  ep 070 | L: R* .  P  .  .  .  | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 071 | L: R* .  G  C  .  .  | R: .  .  .  .  .  P  | -> RIGHT pos 3
+  ep 072 | L: .  .  .  R* .  .  | R: .  P  .  .  .  .  | -> RIGHT pos 3
+  ep 073 | L: C  P  .  .  .  R* | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 074 | L: G  .  R* .  .  P  | R: C  .  .  .  .  .  | -> RIGHT pos 3
+
+======================================================================================
+  SESSION 4/8  (eps 75-99)   >> re-check camera alignment, tape marks, HOME <<
+======================================================================================
+
+RUN 16/40   "Put the cyan vial in the bin."
+  ep 075 | L: .  .  .  .  .  .  | R: C* .  .  .  .  .  | -> BIN
+  ep 076 | L: .  R  C* .  .  .  | R: .  P  .  .  .  .  | -> BIN
+  ep 077 | L: .  .  P  .  G  .  | R: .  .  .  C* .  .  | -> BIN
+  ep 078 | L: .  .  .  C* .  .  | R: .  .  .  P  .  .  | -> BIN
+  ep 079 | L: .  .  .  .  .  .  | R: .  .  .  .  .  C* | -> BIN
+
+RUN 17/40   "Place the red vial in position 1 of the left rack."
+  ep 080 | L: .  .  C  .  .  .  | R: R* .  P  .  .  .  | -> LEFT pos 1
+  ep 081 | L: .  C  .  P  .  .  | R: .  .  .  R* .  C  | -> LEFT pos 1
+  ep 082 | L: .  .  .  .  C  .  | R: .  P  .  .  C  R* | -> LEFT pos 1
+  ep 083 | L: .  .  G  .  .  .  | R: C  .  R* .  .  C  | -> LEFT pos 1
+  ep 084 | L: .  .  G  C  .  .  | R: R* .  .  .  .  .  | -> LEFT pos 1
+
+RUN 18/40   "Place the light purple vial in position 3 of the right rack."
+  ep 085 | L: P* .  .  .  .  .  | R: .  .  .  R  C  R  | -> RIGHT pos 3
+  ep 086 | L: G  .  P* .  .  R  | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 087 | L: .  .  .  P* .  C  | R: .  .  .  R  .  .  | -> RIGHT pos 3
+  ep 088 | L: G  .  .  .  .  P* | R: .  G  .  .  G  .  | -> RIGHT pos 3
+  ep 089 | L: .  .  G  .  C  P* | R: .  .  .  .  .  .  | -> RIGHT pos 3
+
+RUN 19/40   "Put the cyan vial in the bin."
+  ep 090 | L: P  .  G  .  .  .  | R: .  P  .  .  .  C* | -> BIN
+  ep 091 | L: C* .  R  .  .  P  | R: .  R  .  .  .  .  | -> BIN
+  ep 092 | L: .  .  .  .  .  .  | R: .  .  C* .  .  .  | -> BIN
+  ep 093 | L: P  .  .  R  .  .  | R: C* .  .  .  P  .  | -> BIN
+  ep 094 | L: G  .  .  .  .  P  | R: .  P  .  C* .  .  | -> BIN
+
+RUN 20/40   "Place the dark green vial in position 1 of the left rack."
+  ep 095 | L: .  .  .  .  .  .  | R: .  .  .  .  .  G* | -> LEFT pos 1
+  ep 096 | L: .  .  .  .  R  .  | R: .  .  R  G* .  .  | -> LEFT pos 1
+  ep 097 | L: .  .  .  .  .  C  | R: R  P  G* .  .  .  | -> LEFT pos 1
+  ep 098 | L: .  C  .  .  .  .  | R: .  P  .  G* .  .  | -> LEFT pos 1
+  ep 099 | L: .  .  .  .  .  P  | R: G* P  .  .  .  .  | -> LEFT pos 1
+
+======================================================================================
+  SESSION 5/8  (eps 100-124)   >> re-check camera alignment, tape marks, HOME <<
+======================================================================================
+
+RUN 21/40   "Put the red vial in the bin."
+  ep 100 | L: .  .  .  .  .  .  | R: R* .  .  .  .  .  | -> BIN
+  ep 101 | L: .  .  .  .  .  .  | R: .  .  R* .  C  C  | -> BIN
+  ep 102 | L: .  P  .  P  .  R* | R: .  .  .  .  C  .  | -> BIN
+  ep 103 | L: .  .  P  .  .  G  | R: R* P  .  .  .  .  | -> BIN
+  ep 104 | L: .  P  .  R* .  .  | R: .  C  .  .  .  .  | -> BIN
+
+RUN 22/40   "Place the cyan vial in position 3 of the right rack."
+  ep 105 | L: .  P  C* .  R  P  | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 106 | L: .  P  .  .  .  C* | R: .  G  .  .  .  .  | -> RIGHT pos 3
+  ep 107 | L: C* .  .  .  .  .  | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 108 | L: .  G  .  C* .  .  | R: .  P  .  .  R  .  | -> RIGHT pos 3
+  ep 109 | L: C* .  G  .  .  .  | R: .  G  .  .  R  .  | -> RIGHT pos 3
+
+RUN 23/40   "Place the light purple vial in position 1 of the left rack."
+  ep 110 | L: .  .  .  .  R  .  | R: P* .  .  .  .  .  | -> LEFT pos 1
+  ep 111 | L: .  C  .  R  .  .  | R: .  C  P* .  .  .  | -> LEFT pos 1
+  ep 112 | L: .  .  .  R  .  .  | R: .  .  .  .  .  P* | -> LEFT pos 1
+  ep 113 | L: .  .  .  .  R  G  | R: G  .  .  P* .  .  | -> LEFT pos 1
+  ep 114 | L: .  .  .  G  .  .  | R: .  C  .  .  C  P* | -> LEFT pos 1
+
+RUN 24/40   "Place the red vial in position 3 of the right rack."
+  ep 115 | L: P  .  .  R* .  G  | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 116 | L: .  .  .  R* .  P  | R: .  G  .  .  .  P  | -> RIGHT pos 3
+  ep 117 | L: C  .  .  C  .  R* | R: .  .  .  C  .  .  | -> RIGHT pos 3
+  ep 118 | L: R* .  P  .  .  .  | R: .  .  .  .  C  C  | -> RIGHT pos 3
+  ep 119 | L: .  C  R* P  .  .  | R: G  .  .  .  .  .  | -> RIGHT pos 3
+
+RUN 25/40   "Place the light purple vial in position 1 of the left rack."
+  ep 120 | L: .  .  .  .  .  .  | R: .  .  P* .  .  R  | -> LEFT pos 1
+  ep 121 | L: .  .  .  .  .  .  | R: .  .  C  R  G  P* | -> LEFT pos 1
+  ep 122 | L: .  G  .  .  R  .  | R: P* .  .  .  .  .  | -> LEFT pos 1
+  ep 123 | L: .  .  .  .  .  .  | R: .  .  G  P* .  .  | -> LEFT pos 1
+  ep 124 | L: .  C  .  .  .  .  | R: .  .  .  .  C  P* | -> LEFT pos 1
+
+======================================================================================
+  SESSION 6/8  (eps 125-149)   >> re-check camera alignment, tape marks, HOME <<
+======================================================================================
+
+RUN 26/40   "Put the dark green vial in the bin."
+  ep 125 | L: P  .  .  C  .  .  | R: G* .  .  .  .  .  | -> BIN
+  ep 126 | L: .  .  C  G* P  .  | R: R  .  .  .  .  .  | -> BIN
+  ep 127 | L: R  .  .  .  .  G* | R: .  .  .  .  .  .  | -> BIN
+  ep 128 | L: .  .  G* .  .  .  | R: .  .  .  .  .  .  | -> BIN
+  ep 129 | L: .  .  .  .  C  .  | R: G* .  .  .  P  R  | -> BIN
+
+RUN 27/40   "Place the cyan vial in position 3 of the right rack."
+  ep 130 | L: .  .  .  .  .  C* | R: R  .  .  .  .  R  | -> RIGHT pos 3
+  ep 131 | L: .  .  C* .  P  .  | R: R  .  .  .  .  .  | -> RIGHT pos 3
+  ep 132 | L: C* P  .  .  .  .  | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 133 | L: .  G  C* .  .  .  | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 134 | L: .  .  .  C* P  .  | R: .  .  .  .  .  G  | -> RIGHT pos 3
+
+RUN 28/40   "Place the red vial in position 1 of the left rack."
+  ep 135 | L: .  .  .  .  .  P  | R: G  .  R* P  .  .  | -> LEFT pos 1
+  ep 136 | L: .  .  .  .  .  .  | R: .  .  .  R* .  .  | -> LEFT pos 1
+  ep 137 | L: .  .  G  .  .  P  | R: R* .  .  .  .  .  | -> LEFT pos 1
+  ep 138 | L: .  P  G  .  .  .  | R: .  .  .  P  .  R* | -> LEFT pos 1
+  ep 139 | L: .  G  .  .  .  C  | R: .  .  R* P  .  .  | -> LEFT pos 1
+
+RUN 29/40   "Place the dark green vial in position 3 of the right rack."
+  ep 140 | L: .  .  G* .  P  .  | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 141 | L: .  .  .  .  .  G* | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 142 | L: G* C  .  .  .  R  | R: .  .  .  .  .  P  | -> RIGHT pos 3
+  ep 143 | L: .  .  .  .  .  G* | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 144 | L: .  P  .  G* C  .  | R: .  P  .  .  .  .  | -> RIGHT pos 3
+
+RUN 30/40   "Place the light purple vial in position 1 of the left rack."
+  ep 145 | L: .  .  .  .  C  .  | R: .  .  .  P* .  .  | -> LEFT pos 1
+  ep 146 | L: .  .  R  .  .  .  | R: P* G  .  .  .  .  | -> LEFT pos 1
+  ep 147 | L: .  .  .  .  .  C  | R: .  C  .  C  .  P* | -> LEFT pos 1
+  ep 148 | L: .  .  .  .  C  .  | R: .  .  C  .  .  P* | -> LEFT pos 1
+  ep 149 | L: .  C  .  .  C  .  | R: .  .  P* .  .  R  | -> LEFT pos 1
+
+======================================================================================
+  SESSION 7/8  (eps 150-174)   >> re-check camera alignment, tape marks, HOME <<
+======================================================================================
+
+RUN 31/40   "Place the red vial in position 3 of the right rack."
+  ep 150 | L: .  .  R* .  .  .  | R: .  .  .  .  C  .  | -> RIGHT pos 3
+  ep 151 | L: R* .  .  .  .  .  | R: .  P  .  .  .  .  | -> RIGHT pos 3
+  ep 152 | L: .  .  .  R* .  P  | R: G  .  .  .  .  .  | -> RIGHT pos 3
+  ep 153 | L: .  .  .  R* .  .  | R: G  C  .  .  G  .  | -> RIGHT pos 3
+  ep 154 | L: .  .  .  .  .  R* | R: .  .  .  P  .  .  | -> RIGHT pos 3
+
+RUN 32/40   "Place the dark green vial in position 1 of the left rack."
+  ep 155 | L: .  .  .  .  .  .  | R: G* .  R  P  .  R  | -> LEFT pos 1
+  ep 156 | L: .  R  .  .  .  .  | R: .  .  .  .  .  G* | -> LEFT pos 1
+  ep 157 | L: .  .  .  R  P  .  | R: C  .  G* .  .  .  | -> LEFT pos 1
+  ep 158 | L: .  .  .  C  .  .  | R: P  .  .  .  .  G* | -> LEFT pos 1
+  ep 159 | L: .  C  .  .  P  .  | R: .  .  R  G* .  .  | -> LEFT pos 1
+
+RUN 33/40   "Put the red vial in the bin."
+  ep 160 | L: .  .  .  .  G  .  | R: .  .  .  R* .  .  | -> BIN
+  ep 161 | L: .  .  R* C  .  .  | R: .  .  .  .  .  .  | -> BIN
+  ep 162 | L: .  .  .  .  .  .  | R: R* .  .  P  P  .  | -> BIN
+  ep 163 | L: .  .  R* C  .  .  | R: .  G  .  .  .  .  | -> BIN
+  ep 164 | L: .  .  .  .  P  .  | R: .  .  .  .  .  R* | -> BIN
+
+RUN 34/40   "Place the dark green vial in position 3 of the right rack."
+  ep 165 | L: G* .  .  .  .  .  | R: R  C  .  .  .  .  | -> RIGHT pos 3
+  ep 166 | L: C  P  .  .  .  G* | R: .  .  .  .  R  .  | -> RIGHT pos 3
+  ep 167 | L: .  .  .  .  .  G* | R: .  R  .  .  .  .  | -> RIGHT pos 3
+  ep 168 | L: .  .  G* .  .  .  | R: .  P  .  P  .  .  | -> RIGHT pos 3
+  ep 169 | L: .  P  P  G* .  .  | R: .  .  .  .  .  .  | -> RIGHT pos 3
+
+RUN 35/40   "Place the cyan vial in position 1 of the left rack."
+  ep 170 | L: .  G  .  .  .  .  | R: .  .  .  .  .  C* | -> LEFT pos 1
+  ep 171 | L: .  P  .  R  .  .  | R: .  .  C* G  .  .  | -> LEFT pos 1
+  ep 172 | L: .  .  .  R  .  .  | R: C* .  .  .  P  .  | -> LEFT pos 1
+  ep 173 | L: .  .  .  R  R  .  | R: .  .  .  C* G  .  | -> LEFT pos 1
+  ep 174 | L: .  .  .  .  P  .  | R: .  .  .  C* .  G  | -> LEFT pos 1
+
+======================================================================================
+  SESSION 8/8  (eps 175-199)   >> re-check camera alignment, tape marks, HOME <<
+======================================================================================
+
+RUN 36/40   "Put the light purple vial in the bin."
+  ep 175 | L: .  C  .  R  .  .  | R: .  .  .  .  .  P* | -> BIN
+  ep 176 | L: P* .  C  .  .  C  | R: .  .  .  G  .  .  | -> BIN
+  ep 177 | L: .  .  C  G  .  G  | R: P* .  .  .  .  .  | -> BIN
+  ep 178 | L: .  .  P* .  .  R  | R: .  .  .  .  .  .  | -> BIN
+  ep 179 | L: .  G  .  P* C  G  | R: .  .  .  .  .  .  | -> BIN
+
+RUN 37/40   "Place the red vial in position 1 of the left rack."
+  ep 180 | L: .  G  .  .  .  .  | R: .  .  .  .  .  R* | -> LEFT pos 1
+  ep 181 | L: .  .  .  .  .  G  | R: .  .  .  .  C  R* | -> LEFT pos 1
+  ep 182 | L: .  .  .  .  .  .  | R: .  .  R* .  P  .  | -> LEFT pos 1
+  ep 183 | L: .  P  .  P  .  .  | R: .  C  .  R* .  .  | -> LEFT pos 1
+  ep 184 | L: .  G  .  .  .  .  | R: R* .  .  .  G  .  | -> LEFT pos 1
+
+RUN 38/40   "Put the dark green vial in the bin."
+  ep 185 | L: .  .  .  .  .  G* | R: .  .  .  .  .  .  | -> BIN
+  ep 186 | L: .  C  .  G* .  .  | R: .  .  .  .  P  .  | -> BIN
+  ep 187 | L: P  .  .  P  .  .  | R: .  .  .  G* .  .  | -> BIN
+  ep 188 | L: .  .  .  .  .  .  | R: .  .  G* .  .  .  | -> BIN
+  ep 189 | L: .  .  .  .  R  .  | R: G* R  .  .  .  .  | -> BIN
+
+RUN 39/40   "Place the cyan vial in position 3 of the right rack."
+  ep 190 | L: C* .  .  G  .  .  | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 191 | L: .  .  G  P  .  C* | R: .  R  .  .  .  .  | -> RIGHT pos 3
+  ep 192 | L: P  .  C* P  .  .  | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 193 | L: .  .  C* P  .  .  | R: .  .  .  .  .  .  | -> RIGHT pos 3
+  ep 194 | L: .  .  .  C* .  P  | R: .  P  .  G  .  .  | -> RIGHT pos 3
+
+RUN 40/40   "Put the red vial in the bin."
+  ep 195 | L: .  .  .  C  .  G  | R: .  .  R* C  .  .  | -> BIN
+  ep 196 | L: R* P  .  .  .  .  | R: P  .  .  .  .  G  | -> BIN
+  ep 197 | L: .  .  .  R* .  .  | R: C  G  .  .  .  .  | -> BIN
+  ep 198 | L: .  .  C  .  .  R* | R: .  .  .  .  .  .  | -> BIN
+  ep 199 | L: .  .  .  .  .  R* | R: .  .  .  P  .  .  | -> BIN
+
+======================================================================================
+COVERAGE CHECK (generated, seed=42; episodes 0-indexed = lerobot episode_index)
+--------------------------------------------------------------------------------------
+  dest BIN          70 eps
+  dest LEFT pos 1   65 eps
+  dest RIGHT pos 3  65 eps
+
+  target CYAN          50 eps
+  target DARK-GREEN    50 eps
+  target LIGHT-PURPLE  50 eps
+  target RED           50 eps
+  TOTAL: 200 episodes (0-199), 40 runs, 8 sessions of 25
+
+SCENE QA
+--------------------------------------------------------------------------------------
+  source-slot spread: slot 1: 50, slot 3: 48, slot 4: 50, slot 6: 52
+  bin sources by rack: L=30 R=40
+  vials per scene: 1-vial: 14, 2-vial: 43, 3-vial: 72, 4-vial: 71
+  color appearances (target+distractor): CYAN: 159, DARK-GREEN: 139, LIGHT-PURPLE: 158, RED: 144
+  hard rules OK: unique target color / dest slot empty / <=4 per rack -- all 200 eps

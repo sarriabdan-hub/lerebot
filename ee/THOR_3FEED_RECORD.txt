@@ -1,0 +1,342 @@
+========================================================================
+ THOR PATCH — record all 3 camera feeds at FULL rate, on the robot
+ (paste this whole file to Claude Code running ON THOR)
+========================================================================
+
+WHY
+  The workstation records the replay by polling Thor's /observe over HTTP, so it
+  only grabs a handful of frames per second -> choppy, frame-skipping video.
+  Thor already HAS every frame at the control-loop rate. This patch makes Thor
+  record a single side|top|wrist composite clip PER RUN, locally, at full rate,
+  and serve it over HTTP so the workstation can pull it for the replay UI.
+
+  Result: the 3-feed videos are (a) saved locally on Thor in ee/thor_3feed/, and
+  (b) shown in the workstation dashboard's Replay tab at full fps.
+
+*** VLA PERFORMANCE IS NOT AFFECTED ***
+  The control loop does essentially no extra work: per step it only COPIES the 3
+  small camera arrays (~0.3 ms memcpy) and drops them on a queue. ALL the heavy
+  work — resize, compositing, and video encoding — runs on a SEPARATE background
+  thread. If that thread ever falls behind, frames are DROPPED, never blocked. So
+  the 30 Hz control rate (and thus the arm's motion) is unchanged. You can prove
+  it: compare `control_hz_mean` in /state with vs without --record-3feed — same.
+
+FILE TO EDIT (on Thor):
+  /home/robot/dev/lerebot/ee/vla_server.py
+  (edit BY HAND — do NOT scp/overwrite; it has the camera/bus/home patches.)
+
+There are 6 small edits (A–F). All anchors below are copied from your file.
+
+------------------------------------------------------------------------
+ EDIT A — add the recorder helpers (background-thread encoder)
+------------------------------------------------------------------------
+Find this function (near the top):
+
+    def _publish_frames(obs_raw: dict) -> None:
+        """Throttled: push the current observation's frames into LIVE for the UI."""
+        now = time.perf_counter()
+        if now - LIVE["frame_ts"] < FRAME_INTERVAL_S:
+            return
+        frames = _encode_obs_frames(obs_raw)
+        if frames:
+            with LIVE_LOCK:
+                LIVE["frames"] = frames
+                LIVE["frame_ts"] = now
+
+Immediately AFTER it, PASTE this whole block:
+
+# ── 3-feed composite recorder (all cams, full rate, OFF the control loop) ───────
+# Records side|top|wrist as ONE mp4 per execute, locally on Thor (ee/thor_3feed/).
+# PERFORMANCE: the control loop only COPIES the 3 camera arrays (~0.3 ms) and hands
+# them to the background encoder thread below; ALL resize/composite/encode work runs
+# on that thread. If it falls behind, frames are DROPPED (never blocks the loop), so
+# the VLA control rate is untouched. The workstation pulls the clip via GET /last_clip
+# (+ /last_clip_info for timing) and retimes it to real-time for the replay.
+REC_TILE_H = 360                                  # per-tile height (drop to 288 for even less CPU)
+REC_CAMS = ("cam_side", "cam_top", "cam_wrist")   # left-to-right order in the composite
+REC_QCAP = 300                                    # max queued frames; beyond this we drop (encoder keeps up)
+_REC = {"path": None, "q": None, "stop": None, "thread": None, "n": 0, "t0": 0.0, "active": False}
+
+
+def _rec_composite(item: dict):
+    """side | top | wrist -> one BGR frame (black tile for a missing cam so the size stays constant)."""
+    tiles, any_real = [], False
+    for cam in REC_CAMS:
+        rgb = item.get(cam)
+        if rgb is None:
+            tiles.append(np.zeros((REC_TILE_H, int(REC_TILE_H * 4 / 3), 3), np.uint8))
+        else:
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            h, w = bgr.shape[:2]
+            tiles.append(cv2.resize(bgr, (int(w * REC_TILE_H / h), REC_TILE_H)))
+            any_real = True
+    return np.hstack(tiles) if any_real else None
+
+
+def _rec_encoder():
+    """Background thread: composite + encode queued frames. All cv2 work lives here, OFF the control loop."""
+    dq, stop = _REC["q"], _REC["stop"]
+    vw, size, n = None, None, 0
+    while True:
+        try:
+            item = dq.popleft()                   # deque.popleft is atomic in CPython (no lock needed)
+        except IndexError:
+            if stop.is_set():
+                break
+            time.sleep(0.003)
+            continue
+        frame = _rec_composite(item)
+        if frame is None:
+            continue
+        if vw is None:
+            h, w = frame.shape[:2]
+            size = (w, h)
+            vw = cv2.VideoWriter(str(_REC["path"]), cv2.VideoWriter_fourcc(*"mp4v"), float(FPS), (w, h))
+        if (frame.shape[1], frame.shape[0]) != size:
+            frame = cv2.resize(frame, size)
+        vw.write(frame)
+        n += 1
+    if vw is not None:
+        vw.release()
+    _REC["n"] = n                                 # publish the final frame count for the timing meta
+
+
+def _rec_start():
+    """Begin a new 3-feed recording session + its background encoder thread."""
+    if not STATE.get("record_3feed"):
+        return
+    _rec_finish()                                 # close any stale session first
+    d = Path(__file__).parent / "thor_3feed"
+    d.mkdir(parents=True, exist_ok=True)
+    _REC["path"] = d / f"{int(time.time())}.mp4"
+    _REC["q"] = deque()
+    _REC["stop"] = threading.Event()
+    _REC["n"] = 0
+    _REC["t0"] = time.perf_counter()
+    _REC["thread"] = threading.Thread(target=_rec_encoder, name="rec-encoder", daemon=True)
+    _REC["active"] = True
+    _REC["thread"].start()
+
+
+def _rec_write(obs_raw: dict):
+    """Control-loop side: COPY the 3 cam arrays (cheap memcpy) and hand off. Never blocks; drops if full."""
+    if not _REC["active"]:
+        return
+    item = {}
+    for cam in REC_CAMS:
+        rgb = _find_cam_frame(obs_raw, cam)
+        if rgb is not None:
+            item[cam] = rgb.copy()                # copy so the encoder can't race the next get_observation
+    if not item:
+        return
+    dq = _REC["q"]
+    if dq is not None and len(dq) < REC_QCAP:     # drop instead of blocking if the encoder is behind
+        dq.append(item)
+
+
+def _rec_finish():
+    """Finalize: stop the encoder, let it drain the queue, and record timing for /last_clip_info."""
+    if not _REC["active"]:
+        return
+    _REC["active"] = False
+    elapsed = max(time.perf_counter() - _REC["t0"], 0.001)   # capture window = t0..now (drain doesn't count)
+    if _REC["stop"] is not None:
+        _REC["stop"].set()
+    if _REC["thread"] is not None:
+        _REC["thread"].join(timeout=15.0)         # wait for the queued frames to finish encoding
+    n = _REC["n"]
+    STATE["last_clip"] = str(_REC["path"])
+    STATE["last_clip_meta"] = {"n_frames": n, "elapsed": round(elapsed, 3),
+                               "nominal_fps": float(FPS), "real_fps": round(n / elapsed, 2)}
+    print(f"[3feed] {_REC['path']}  ({n} frames, {elapsed:.1f}s, {n / elapsed:.1f} fps real)")
+    _REC["q"] = None
+    _REC["thread"] = None
+    _REC["stop"] = None
+# ────────────────────────────────────────────────────────────────────────────────
+
+(No new imports needed — `deque`, `threading`, `time`, `cv2`, `np`, `Path`, `FPS`,
+ `os`, `STATE`, and `_find_cam_frame` are all already in this file.)
+
+------------------------------------------------------------------------
+ EDIT B — add the --record-3feed flag + wire it into STATE
+------------------------------------------------------------------------
+B1) In parse_args(), find the existing --record-cam arg:
+
+    p.add_argument("--record-cam", default="cam_side",
+                   help="Which camera to record with --record-video (substring match: cam_side/cam_top/cam_wrist).")
+
+    ADD right after it:
+
+    p.add_argument("--record-3feed", action="store_true",
+                   help="Record a side|top|wrist composite of each execute to ee/thor_3feed/ at the full "
+                        "control-loop rate (encoded on a background thread, no control-rate cost), and "
+                        "serve it at GET /last_clip for the workstation replay.")
+
+B2) In main(), find the STATE.update(...) call and its line:
+
+                     record_video=args.record_video, record_cam=args.record_cam,
+
+    CHANGE that line to also carry record_3feed:
+
+                     record_video=args.record_video, record_cam=args.record_cam,
+                     record_3feed=args.record_3feed,
+
+------------------------------------------------------------------------
+ EDIT C — start a session + record each step, in BOTH execute paths
+------------------------------------------------------------------------
+You run with --async-chunks, so run_command_async is the live path — but patch
+BOTH functions so it works either way. In EACH of run_command_async() AND
+run_command():
+
+C1) Find the FIRST call (near the top of each function):
+
+        _set_live(busy=True, phase="execute", task=task, t_start=time.time(),
+                  duration=duration, n_steps=0, last_stats=None)
+
+    ADD one line right after it:
+
+        _rec_start()                              # begin the 3-feed recording for this run
+
+C2) Find the live-frame publish inside each function's control loop:
+
+            _publish_frames(obs_raw)
+
+    ADD one line right after it (do this in BOTH functions):
+
+            _publish_frames(obs_raw)
+            _rec_write(obs_raw)                   # hand this frame to the background encoder
+
+------------------------------------------------------------------------
+ EDIT D — keep recording through the bin drop (gripper release)
+------------------------------------------------------------------------
+In release_gripper(), find the loop body:
+
+            follower.send_action(step)
+            # keep /observe live during the release (same pattern as go_home)
+            if time.perf_counter() - LIVE["frame_ts"] >= FRAME_INTERVAL_S:
+                _publish_frames(follower.get_observation())
+            precise_sleep(1.0 / FPS)
+
+    REPLACE those lines with (reads the observation once, feeds both):
+
+            follower.send_action(step)
+            _obs = follower.get_observation()
+            _rec_write(_obs)                       # record the drop into the 3-feed clip
+            if time.perf_counter() - LIVE["frame_ts"] >= FRAME_INTERVAL_S:
+                _publish_frames(_obs)
+            precise_sleep(1.0 / FPS)
+
+------------------------------------------------------------------------
+ EDIT E — finalize the clip after execute (+ any release)
+------------------------------------------------------------------------
+In the HTTP handler's do_POST(), find the /execute block:
+
+        try:
+            print(f"[execute] task={task!r} duration={duration}s")
+            with ROBOT_LOCK:  # serialize all robot access
+                stats = run_command(task, duration)
+                # complete a bin/discard drop: open the gripper in place
+                want_release = req.get("release")
+                if want_release is None:
+                    want_release = _is_discard(task)
+                if want_release:
+                    stats = {**stats, "release": release_gripper()}
+            print(f"[execute] done: {stats}")
+            _log_run(task, duration, stats)
+            self._send(200, stats)
+        except Exception as e:  # noqa: BLE001
+            _set_live(busy=False, phase="error")
+            self._send(500, {"error": repr(e)})
+
+    Add a _rec_finish() call in BOTH the success path and the except (so the file
+    is always closed). Make it look like this:
+
+        try:
+            print(f"[execute] task={task!r} duration={duration}s")
+            with ROBOT_LOCK:  # serialize all robot access
+                stats = run_command(task, duration)
+                # complete a bin/discard drop: open the gripper in place
+                want_release = req.get("release")
+                if want_release is None:
+                    want_release = _is_discard(task)
+                if want_release:
+                    stats = {**stats, "release": release_gripper()}
+            _rec_finish()                          # finalize the 3-feed clip (execute + release)
+            print(f"[execute] done: {stats}")
+            _log_run(task, duration, stats)
+            self._send(200, stats)
+        except Exception as e:  # noqa: BLE001
+            _rec_finish()                          # also close the clip on error
+            _set_live(busy=False, phase="error")
+            self._send(500, {"error": repr(e)})
+
+------------------------------------------------------------------------
+ EDIT F — serve the clip to the workstation
+------------------------------------------------------------------------
+F1) In the Handler class, add this method (put it right after the existing
+    _send_html method):
+
+    def _serve_clip(self):
+        p = STATE.get("last_clip")
+        if not p or not os.path.exists(p):
+            self._send(404, {"error": "no clip yet"})
+            return
+        try:
+            with open(p, "rb") as fh:
+                data = fh.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+F2) In do_GET(), find the /state route:
+
+        elif self.path == "/state":
+            self._send(200, state_snapshot())
+
+    ADD these two routes right after it:
+
+        elif self.path == "/last_clip":
+            self._serve_clip()
+        elif self.path == "/last_clip_info":
+            meta = STATE.get("last_clip_meta")
+            p = STATE.get("last_clip")
+            if meta and p and os.path.exists(p):
+                self._send(200, {**meta, "name": os.path.basename(p), "bytes": os.path.getsize(p)})
+            else:
+                self._send(404, {"error": "no clip yet"})
+
+========================================================================
+ RESTART (note: --record-3feed replaces --record-video/--record-cam)
+========================================================================
+    pkill -f vla_server.py ; lsof -ti:8000 | xargs -r kill ; sleep 2
+    conda run -n lerobot --no-capture-output \
+      python /home/robot/dev/lerebot/ee/vla_server.py \
+      --checkpoint /home/robot/dev/lerebot/ckpt_pi05_v5_12000 \
+      --n-action-steps 15 --async-chunks \
+      --filter oneeuro --euro-min-cutoff 0.3 --euro-beta 0.02 \
+      --record-3feed --log-file /tmp/vla_pi05_v5.log
+
+========================================================================
+ VERIFY (on Thor, after one run)
+========================================================================
+  1) Control rate unchanged (the whole point): run one execute, then
+       curl -s http://127.0.0.1:8000/state | python3 -m json.tool | grep control_hz
+     -> control_hz_mean should match what you saw WITHOUT --record-3feed.
+  2) Local file exists:  ls -lh /home/robot/dev/lerebot/ee/thor_3feed/
+     and the server printed a line like:
+       [3feed] .../thor_3feed/1724500000.mp4  (612 frames, 38.0s, 16.1 fps real)
+  3) Endpoint serves it:  curl -s http://127.0.0.1:8000/last_clip_info
+       -> {"n_frames":612,"elapsed":38.0,"nominal_fps":30.0,"real_fps":16.1,...}
+  The workstation dashboard pulls /last_clip automatically on each run and shows
+  the full-rate 3-feed clip in the Replay tab.
+
+WHY THIS IS SAFE
+  - No change to motion, IK, or the release trajectory; STOP still halts everything.
+  - The control loop only copies arrays + enqueues; all encoding is on a daemon
+    thread that DROPS frames if it can't keep up — it can never stall the arm.
+  - --record-3feed is opt-in; without it the server behaves exactly as before.
+========================================================================

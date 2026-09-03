@@ -1,0 +1,9 @@
+{
+  "video": "isaac/out/groot_v4/groot_5000_ep0.mp4",
+  "task": "Place the red vial in position 1 of the left rack.",
+  "episode": 0,
+  "dest": "LEFT pos 1",
+  "v4": true,
+  "checkpoint": "outputs/train/vial-sort-groot-v4/checkpoints/005000/pretrained_model",
+  "seconds": 45.0
+}

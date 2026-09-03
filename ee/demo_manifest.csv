@@ -1,0 +1,16 @@
+video,task,ground_truth
+ee/episode_clips/ep0000_cam_side.mp4,Move the vial from position 3 of the right rack to the bin.,1
+ee/episode_clips/ep0010_cam_side.mp4,Move the vial from position 6 of the left rack to slot 1 of the right rack.,1
+ee/episode_clips/ep0020_cam_side.mp4,Take the vial in slot 4 of the left rack to the sixth slot of the left rack.,1
+ee/episode_clips/ep0030_cam_side.mp4,Move the vial from position 4 of the left rack to slot 3 of the right rack.,1
+ee/episode_clips/ep0040_cam_side.mp4,Take the vial in slot 6 of the left rack to the sixth slot of the right rack.,1
+ee/episode_clips/ep0050_cam_side.mp4,Transfer the tube from the fourth slot of the rack on the left over to the waste bin.,1
+ee/episode_clips/ep0060_cam_side.mp4,Move the vial from position 1 of the right rack to slot 1 of the left rack.,1
+ee/episode_clips/ep0070_cam_side.mp4,Transfer the tube from the first slot of the rack on the right over to hole 3 of the right rack.,1
+ee/episode_clips/ep0080_cam_side.mp4,Transfer the tube from the first slot of the rack on the left over to hole 1 of the right rack.,1
+ee/episode_clips/ep0090_cam_side.mp4,Take the vial in slot 3 of the right rack to the sixth slot of the right rack.,1
+ee/episode_clips/ep0100_cam_side.mp4,Transfer the tube from the third slot of the rack on the left over to hole 1 of the left rack.,1
+ee/episode_clips/ep0110_cam_side.mp4,Carry the test tube in position 4 of the left-side rack to slot 6 of the rack on the left.,1
+ee/episode_clips/ep0120_cam_side.mp4,Transfer the tube from the third slot of the rack on the right over to hole 6 of the right rack.,1
+ee/episode_clips/ep0130_cam_side.mp4,Bring the tube at hole 3 of the rack on the right into the trash can.,1
+ee/episode_clips/ep0140_cam_side.mp4,Transfer the tube from the third slot of the rack on the right over to hole 1 of the left rack.,1

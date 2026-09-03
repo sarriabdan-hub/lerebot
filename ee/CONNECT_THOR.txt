@@ -1,0 +1,52 @@
+========================================================================
+ CONNECT the WS (remote GPU box) to Thor via an SSH reverse tunnel
+========================================================================
+Why: the WS (139.174.67.90, has the RTX 6000 + the Robometer model) is a
+REMOTE box and cannot reach Thor's 192.168.50.60 directly. Your laptop can
+reach BOTH (it's on Thor's wifi AND ssh's into the WS), so we bridge through
+it with one SSH command. No Tailscale needed.
+
+NOTE: don't scp the code to the laptop to run it there — the model needs a
+GPU (~10GB VRAM); the HP Pavilion can't run it. Keep the dashboard on the WS
+(GPU) and just tunnel Thor to it. That's what this does.
+
+------------------------------------------------------------------------
+ STEP 1 — (on the LAPTOP) confirm the laptop can reach Thor
+------------------------------------------------------------------------
+ping -c2 192.168.50.60
+   # must REPLY. If 100% loss, your laptop isn't on Thor's network -> put it
+   # on Thor's wifi first, or use Tailscale on Thor instead.
+
+------------------------------------------------------------------------
+ STEP 2 — (on the LAPTOP) open the reverse tunnel  (port 8009, since WS:8000 is busy)
+------------------------------------------------------------------------
+ssh -N -R 127.0.0.1:8009:192.168.50.60:8000 sari@139.174.67.90
+   # leave this running. It forwards  WS:8009  ->  laptop  ->  Thor:8000.
+   # (earlier it failed on port 8000 because something already listens there.)
+
+------------------------------------------------------------------------
+ STEP 3 — tell Claude the tunnel is up
+------------------------------------------------------------------------
+Claude then verifies from the WS:
+   curl -s http://127.0.0.1:8009/health        # should return Thor's health JSON
+and relaunches the dashboard pointed at the tunnel:
+   ee/robometer/.venv/bin/python ee/robometer_server.py \
+     --host 0.0.0.0 --port 8010 --server http://127.0.0.1:8009
+
+------------------------------------------------------------------------
+ STEP 4 — open the dashboard (from the laptop browser)
+------------------------------------------------------------------------
+http://139.174.67.90:8010      (the WS's public IP)
+   # or, if you also tunnel the UI:  add  -L 8010:127.0.0.1:8010  to the ssh
+   # above, then open http://127.0.0.1:8010 on the laptop.
+
+------------------------------------------------------------------------
+ TROUBLESHOOTING
+------------------------------------------------------------------------
+- "remote port forwarding failed for listen port 8009": that port is also
+  taken on the WS -> pick another (8011, 8012...) and tell Claude which.
+- tunnel connects but dashboard says Thor unreachable: the LAPTOP can't reach
+  192.168.50.60 (redo STEP 1).
+- Prefer permanence? Install Tailscale on Thor (`sudo tailscale up`), give
+  Claude Thor's 100.x IP, and skip the tunnel entirely.
+========================================================================

@@ -1,0 +1,91 @@
+==============================================================================
+ VIAL-SORT v4-ee — EPISODE -> LABEL MAP (verify video matches label in viz)
+ Auto-checked: all 78 labels match expected destination (0 mismatches).
+ Eyeball each video: does the arm END at the destination the label names?
+==============================================================================
+
+ ep  0-17  -> RIGHT pos 6   (orig Session 3 remnant, LEFT->RIGHT)
+ ep 18-37  -> LEFT  pos 1   (orig Session 4, RIGHT->LEFT)
+ ep 38-57  -> LEFT  pos 3   (orig Session 5, RIGHT->LEFT)  [bonus 4th target]
+ ep 58-77  -> LEFT  pos 6   (orig Session 6, RIGHT->LEFT)
+
+ ep | dest    | paraphrased prompt
+------------------------------------------------------------------------------
+  0 | RIGHT p6 | Place the red vial in position 6 of the right rack.
+  1 | RIGHT p6 | Put the red vial into slot 6 of the right rack.
+  2 | RIGHT p6 | Move the red tube at the sixth slot on the right rack.
+  3 | RIGHT p6 | Set the red tube to spot 6 of the rack on the right.
+  4 | RIGHT p6 | Drop the red test tube in the 6th position of the rack on the right.
+  5 | RIGHT p6 | Insert the red test tube into hole 6 of the rack on the right.
+  6 | RIGHT p6 | Position the red vial at the last slot on the right-side rack.
+  7 | RIGHT p6 | Place the red vial to the far end of the right-side rack.
+  8 | RIGHT p6 | Put the red sample tube in position 6 of the right-side rack.
+  9 | RIGHT p6 | Move the red sample tube into slot 6 of the right holder.
+ 10 | RIGHT p6 | Set the red vial at the sixth slot on the right holder.
+ 11 | RIGHT p6 | Drop the red vial to spot 6 of the right holder.
+ 12 | RIGHT p6 | Insert the red tube in the 6th position of the right tube rack.
+ 13 | RIGHT p6 | Position the red tube into hole 6 of the right tube rack.
+ 14 | RIGHT p6 | Place the red test tube at the last slot on the right tube rack.
+ 15 | RIGHT p6 | Put the red test tube to the far end of the right rack.
+ 16 | RIGHT p6 | Move the red vial in position 6 of the right rack.
+ 17 | RIGHT p6 | Set the red vial into slot 6 of the right rack.
+ 18 | LEFT p1 | Place the red vial in position 1 of the left rack.
+ 19 | LEFT p1 | Put the red vial into slot 1 of the left rack.
+ 20 | LEFT p1 | Move the red tube at the first slot on the left rack.
+ 21 | LEFT p1 | Set the red tube to spot 1 of the rack on the left.
+ 22 | LEFT p1 | Drop the red test tube in the 1st position of the rack on the left.
+ 23 | LEFT p1 | Insert the red test tube into hole 1 of the rack on the left.
+ 24 | LEFT p1 | Position the red vial at position 1 on the left-side rack.
+ 25 | LEFT p1 | Place the red vial to slot 1 of the left-side rack.
+ 26 | LEFT p1 | Put the red sample tube in the first slot of the left-side rack.
+ 27 | LEFT p1 | Move the red sample tube into spot 1 of the left holder.
+ 28 | LEFT p1 | Set the red vial at the 1st position on the left holder.
+ 29 | LEFT p1 | Drop the red vial to hole 1 of the left holder.
+ 30 | LEFT p1 | Insert the red tube in position 1 of the left tube rack.
+ 31 | LEFT p1 | Position the red tube into slot 1 of the left tube rack.
+ 32 | LEFT p1 | Place the red test tube at the first slot on the left tube rack.
+ 33 | LEFT p1 | Put the red test tube to spot 1 of the left rack.
+ 34 | LEFT p1 | Move the red vial in the 1st position of the left rack.
+ 35 | LEFT p1 | Set the red vial into hole 1 of the left rack.
+ 36 | LEFT p1 | Drop the red sample tube at position 1 on the rack on the left.
+ 37 | LEFT p1 | Insert the red sample tube to slot 1 of the rack on the left.
+ 38 | LEFT p3 | Place the red vial in position 3 of the left rack.
+ 39 | LEFT p3 | Put the red vial into slot 3 of the left rack.
+ 40 | LEFT p3 | Move the red tube at the third slot on the left rack.
+ 41 | LEFT p3 | Set the red tube to spot 3 of the rack on the left.
+ 42 | LEFT p3 | Drop the red test tube in the 3rd position of the rack on the left.
+ 43 | LEFT p3 | Insert the red test tube into hole 3 of the rack on the left.
+ 44 | LEFT p3 | Position the red vial at position 3 on the left-side rack.
+ 45 | LEFT p3 | Place the red vial to slot 3 of the left-side rack.
+ 46 | LEFT p3 | Put the red sample tube in the third slot of the left-side rack.
+ 47 | LEFT p3 | Move the red sample tube into spot 3 of the left holder.
+ 48 | LEFT p3 | Set the red vial at the 3rd position on the left holder.
+ 49 | LEFT p3 | Drop the red vial to hole 3 of the left holder.
+ 50 | LEFT p3 | Insert the red tube in position 3 of the left tube rack.
+ 51 | LEFT p3 | Position the red tube into slot 3 of the left tube rack.
+ 52 | LEFT p3 | Place the red test tube at the third slot on the left tube rack.
+ 53 | LEFT p3 | Put the red test tube to spot 3 of the left rack.
+ 54 | LEFT p3 | Move the red vial in the 3rd position of the left rack.
+ 55 | LEFT p3 | Set the red vial into hole 3 of the left rack.
+ 56 | LEFT p3 | Drop the red sample tube at position 3 on the rack on the left.
+ 57 | LEFT p3 | Insert the red sample tube to slot 3 of the rack on the left.
+ 58 | LEFT p6 | Place the red vial in position 6 of the left rack.
+ 59 | LEFT p6 | Put the red vial into slot 6 of the left rack.
+ 60 | LEFT p6 | Move the red tube at the sixth slot on the left rack.
+ 61 | LEFT p6 | Set the red tube to spot 6 of the rack on the left.
+ 62 | LEFT p6 | Drop the red test tube in the 6th position of the rack on the left.
+ 63 | LEFT p6 | Insert the red test tube into hole 6 of the rack on the left.
+ 64 | LEFT p6 | Position the red vial at the last slot on the left-side rack.
+ 65 | LEFT p6 | Place the red vial to the far end of the left-side rack.
+ 66 | LEFT p6 | Put the red sample tube in position 6 of the left-side rack.
+ 67 | LEFT p6 | Move the red sample tube into slot 6 of the left holder.
+ 68 | LEFT p6 | Set the red vial at the sixth slot on the left holder.
+ 69 | LEFT p6 | Drop the red vial to spot 6 of the left holder.
+ 70 | LEFT p6 | Insert the red tube in the 6th position of the left tube rack.
+ 71 | LEFT p6 | Position the red tube into hole 6 of the left tube rack.
+ 72 | LEFT p6 | Place the red test tube at the last slot on the left tube rack.
+ 73 | LEFT p6 | Put the red test tube to the far end of the left rack.
+ 74 | LEFT p6 | Move the red vial in position 6 of the left rack.
+ 75 | LEFT p6 | Set the red vial into slot 6 of the left rack.
+ 76 | LEFT p6 | Drop the red sample tube at the sixth slot on the rack on the left.
+ 77 | LEFT p6 | Insert the red sample tube to spot 6 of the rack on the left.

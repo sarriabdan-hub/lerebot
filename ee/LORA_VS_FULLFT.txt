@@ -1,0 +1,70 @@
+# LoRA vs Full Fine-Tune -- π0 (4B VLA) on SO-101 vial-sorting
+# Framework: LeRobot (lerobot-train --peft.*). Fine-tune the 300M action expert;
+# PaliGemma vision backbone frozen. Dataset: sari-abdan/vial-sort-v1-ee (100 demos).
+
+================================================================================
+BOTTOM LINE: use FULL FINE-TUNE, not LoRA, for this.
+================================================================================
+- Corrected LoRA trains fine and hits the SAME training loss as full-FT (~0.029 vs ~0.030).
+- But on the robot it is WORSE: it SOMETIMES FAILS TO GRAB the vial; full-FT grabs reliably.
+- LoRA gives NO speed or memory advantage here: same ~5-6h training, same GPU VRAM.
+  The only LoRA saving is checkpoint size (54 MB vs 8.3 GB) -- irrelevant for a first adaptation.
+- LoRA is the right tool LATER: cheap swappable adapters for task variants on top of a full-FT base.
+
+================================================================================
+FULL COMPARISON
+================================================================================
+
+                        Original LoRA          Corrected LoRA         Full Fine-Tune
+                        (broken, failed)       (fair, this run)       (deployed)
+                        ────────────────────   ────────────────────   ────────────────────
+method                  LoRA adapter           LoRA adapter           train all expert weights
+r (rank)                16                     32                     n/a (LoRA-only)
+alpha                   8 (default, unset)     64                     n/a
+alpha/r scaling         0.5x  (HALVED!)        2.0x                   n/a
+target_modules          attn q/v + 5 proj      attn q/k/v/o + MLP     all expert weights
+                        (MLP FROZEN)           (gate/up/down) + 5 proj
+optimizer               AdamW                  AdamW                  AdamW
+optimizer LR            2.5e-5 (default)       1e-4                   1e-4
+LR schedule             cosine -> 2.5e-6       cosine -> 2.5e-6       cosine -> 2.5e-6
+betas                   (0.9, 0.95)            (0.9, 0.95)            (0.9, 0.95)
+batch size              8                      16                     16
+steps                   30,000                 30,000                 30,000
+vision encoder          frozen                 frozen                 frozen
+dtype                   bfloat16               bfloat16               bfloat16
+trainable params        ~1.3M                  ~14M                   ~300M
+final training loss     NOT LOGGED             ~0.029                 ~0.030
+loss logged?            no (no evidence)       yes                    yes (endpoint)
+adapter learned?        unknown                131/131 layers,        n/a
+                                               mean lora_B 1.97
+checkpoint size         6 MB                   54 MB                  8.3 GB
+training time           ~2h22m (batch 8)       ~5h53m                 ~5h01m
+GPU VRAM (batch 16)     same as full-FT        ~52 GB                 ~52-58 GB
+robot result            FAILED                 WORSE: misses grab     RELIABLE grab -> DEPLOY
+
+================================================================================
+WHY THE ORIGINAL RUN FAILED (config bugs, not LoRA itself)
+================================================================================
+1. alpha unset -> peft default 8, so alpha/r = 0.5 -> every adapter update HALVED.
+2. MLP feed-forward layers were never targeted -> the motion-primitive layers couldn't adapt.
+3. LR too low (2.5e-5 vs 1e-4), batch half (8 vs 16), and loss never logged.
+=> The "5 MB = nothing changed" claim was wrong; size measures nothing. Fixing 1-3 made
+   LoRA train correctly (same loss as full-FT) -- but it still loses on the robot.
+
+================================================================================
+WHY LoRA LOSES ON THE ROBOT DESPITE EQUAL LOSS
+================================================================================
+Full-FT can fully rewrite the action expert's motion priors; a rank-32 low-rank patch only
+approximates that, and the gap shows up at the hardest, most precision-sensitive moment --
+the grasp. Equal training loss did NOT predict equal robot success.
+
+NOTE: the robot verdict is an informal field observation, not yet counted trials. To make it
+a hard number, run a frozen protocol: same start configs, >=10 trials/position, success scored
+by ee/slot_reader.py, report success-rate per position (not loss).
+
+================================================================================
+HOW TO NEVER REPEAT THE FAILURE
+================================================================================
+Always set --peft.lora_alpha >= r; always target the MLP; always log the loss; run
+ee/check_adapter.py (checks scaling, MLP coverage, per-layer adapter norms) before trusting
+any LoRA checkpoint.

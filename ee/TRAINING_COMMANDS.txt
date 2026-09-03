@@ -1,0 +1,64 @@
+# Training commands — vial-sort-pi0-fullft
+# All 100 episodes, batch 16, full fine-tune action expert, 30k steps
+
+# ── START training in tmux (survives SSH disconnect) ─────────────────────────
+# Step 0 — kill any existing train session first:
+tmux kill-session -t train 2>/dev/null; pkill -f lerobot-train 2>/dev/null; echo "killed"
+
+# Step 1 — go to right dir (must be here):
+cd ~/lerobot
+
+# Step 2 — open tmux (this opens an interactive session, your terminal goes inside it):
+tmux new-session -s train
+
+# Step 3 — paste this inside tmux (you will see output live so you know if it errors):
+/home/sari/lerobot/.venv/bin/lerobot-train --dataset.repo_id sari-abdan/vial-sort-v1-ee --dataset.root ./data/vial-sort-v1-ee --policy.type pi0 --policy.pretrained_path lerobot/pi0 --policy.push_to_hub false --policy.dtype bfloat16 --policy.freeze_vision_encoder true --policy.train_expert_only true --policy.optimizer_lr 1e-4 --policy.chunk_size 50 --policy.n_action_steps 50 --batch_size 16 --steps 30000 --save_freq 5000 --log_freq 200 --output_dir outputs/train/vial-sort-pi0-fullft 2>&1 | tee /tmp/fullft.log
+
+# Step 4 — once you see it loading, detach with: Ctrl+B then D
+# (training keeps running after you disconnect SSH)
+
+# ── tmux cheat sheet ──────────────────────────────────────────────────────────
+# Attach to the session (re-enter it):
+tmux attach -t train
+
+# Detach and leave it running (inside tmux):
+#   press  Ctrl+B  then  D
+
+# List running sessions:
+tmux ls
+
+# Kill the session (stop training):
+tmux kill-session -t train
+
+# ── Monitor progress (from outside tmux) ─────────────────────────────────────
+grep -oP "step:\S+ .*loss:\S+" /tmp/fullft.log | tail -5
+
+# ── Check VRAM ───────────────────────────────────────────────────────────────
+nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader
+
+# ── Validate at checkpoint (run on workstation, no robot) ────────────────────
+export LEREBOT_CKPT=outputs/train/vial-sort-pi0-fullft/checkpoints/015000/pretrained_model
+export LEREBOT_DS=data/vial-sort-v1-static
+.venv/bin/python ee/vision_test.py 49 95
+.venv/bin/python ee/chunk_check.py
+
+# ── Rsync to Thor (run from workstation, needs SSH password) ─────────────────
+rsync -av --delete \
+  outputs/train/vial-sort-pi0-fullft/checkpoints/last/pretrained_model/ \
+  robot@192.168.123.198:/home/robot/dev/lerebot/pretrained_model/
+
+# ── RESUME if interrupted (start from last saved checkpoint) ─────────────────
+# Step 1:
+cd ~/lerobot
+# Step 2:
+tmux new-session -s train
+# Step 3 — paste inside tmux:
+/home/sari/lerobot/.venv/bin/lerobot-train --dataset.repo_id sari-abdan/vial-sort-v1-ee --dataset.root ./data/vial-sort-v1-ee --policy.type pi0 --policy.pretrained_path lerobot/pi0 --policy.push_to_hub false --policy.dtype bfloat16 --policy.freeze_vision_encoder true --policy.train_expert_only true --policy.optimizer_lr 1e-4 --policy.chunk_size 50 --policy.n_action_steps 50 --batch_size 16 --steps 30000 --save_freq 5000 --log_freq 200 --checkpoint_path outputs/train/vial-sort-pi0-fullft/checkpoints/last --output_dir outputs/train/vial-sort-pi0-fullft 2>&1 | tee /tmp/fullft.log
+
+# ── Rsync lora-100eps (LoRA, all 100 eps, 30k steps, batch 8) to Thor ────────
+# Run from ~/lerobot, needs SSH password:
+rsync -av --delete outputs/train/vial-sort-pi0-lora/checkpoints/last/pretrained_model/ robot@192.168.123.198:/home/robot/dev/lerebot/pretrained_model/
+
+# ── Rsync fullft (full fine-tune, all 100 eps, 30k steps, batch 16) to Thor ──
+# Run from ~/lerobot, needs SSH password:
+rsync -av --delete outputs/train/vial-sort-pi0-fullft/checkpoints/last/pretrained_model/ robot@192.168.123.198:/home/robot/dev/lerebot/pretrained_model/

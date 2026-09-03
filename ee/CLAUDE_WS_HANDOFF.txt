@@ -1,0 +1,267 @@
+=========================================================================
+ THOR → WORKSTATION HANDOFF — lerobot update for pi05 (2026-06-30)
+ Written for Claude Code running on the WS at /home/sari/lerobot (or wherever)
+=========================================================================
+
+CONTEXT
+-------
+Thor (inference machine) needed to load a pi05 checkpoint (ckpt_v4_008000)
+trained on the WS with upstream lerobot commit 49755a3d. Thor's vendored
+lerobot was stuck at an older state (around commit 7deebcd, lerobot v0.5.2-era)
+which did NOT have:
+  • lerobot.processor.relative_action_processor  (added upstream in PR #3711 / 19fe3159)
+  • lerobot.policies.pi05                         (the pi05 policy class)
+
+Loading the checkpoint failed with:
+  KeyError: "Processor step 'relative_actions_processor' not found in registry"
+
+So we updated Thor's lerobot tree to upstream 49755a3d. This note documents
+EXACTLY what changed, why, and the gotchas — so the WS can do the same update
+without re-discovering the same landmines, AND so the WS is in sync with Thor
+for the round-trip (WS trains → checkpoint → Thor inferences).
+
+
+WHAT GOT UPDATED ON THOR (the recipe to mirror on WS if needed)
+---------------------------------------------------------------
+1) Vendored lerobot lives at /home/robot/dev/lerebot/lerobot/  (no submodule,
+   no nested .git — it's a regular tracked subdirectory of the OUTER repo).
+   On WS the path is likely /home/sari/lerobot/ — adapt accordingly.
+
+2) Cloned upstream at the exact pi05-training commit:
+     git clone https://github.com/huggingface/lerobot.git /tmp/upstream-lerobot
+     cd /tmp/upstream-lerobot && git checkout 49755a3d
+
+3) Rsync'd src/lerobot/ only (NOT pyproject.toml — see GOTCHA 1):
+     rsync -a --delete --exclude='__pycache__' \
+       /tmp/upstream-lerobot/src/lerobot/  /home/robot/dev/lerebot/lerobot/src/lerobot/
+
+   Then removed two empty-after-rsync dirs that lingered because __pycache__
+   was excluded:
+     rm -rf lerobot/src/lerobot/policies/sac lerobot/src/lerobot/policies/sarm
+
+4) Re-applied 3 local hardware patches (see PATCHES section below).
+
+5) pip install -e . --no-deps  (no-deps so the transformers pin stays put)
+
+6) Verify import:
+     python -c "from lerobot.processor.relative_action_processor import *; \
+                from lerobot.policies.factory import get_policy_class; \
+                print(get_policy_class('pi05'))"
+   Expect:  <class 'lerobot.policies.pi05.modeling_pi05.PI05Policy'>
+
+
+GOTCHA 1 — TRANSFORMERS PIN  (CRITICAL — read this twice)
+---------------------------------------------------------
+Upstream 49755a3d changed transformers pin:
+    OLD (ours): "transformers==5.3.0"
+    NEW (49755a3d): "transformers>=5.4.0,<5.6.0"
+
+DO NOT take the new pin on Thor. Thor's CLAUDE.md and the README's
+troubleshooting table are emphatic: with transformers 5.10.2 (and any 5.4+ in
+practice) the pi0 vision-token attention SEVERS and the policy goes blind —
+every 0/10 smoke test was caused by this. Thor stays at transformers==5.3.0.
+
+How we kept the pin: we did NOT rsync pyproject.toml. Our pyproject.toml is
+untouched, so `pip install -e .` keeps transformers at 5.3.0.
+
+For the WS:
+  • If WS only TRAINS pi05 (never runs pi0 inference), upgrading transformers
+    is probably fine — pi05's modeling may need the newer transformers APIs.
+  • If WS also runs pi0 (full-FT) inference for comparison, KEEP transformers
+    at 5.3.0 — same constraint as Thor.
+  • Verify with: pip show transformers | grep Version
+    Then test the policy class you actually care about (pi05 vs pi0).
+
+
+GOTCHA 2 — groot_n1.py + huggingface_hub @strict
+------------------------------------------------
+Upstream 49755a3d's lerobot/policies/groot/groot_n1.py replaced @dataclass
+with @strict (from huggingface_hub.dataclasses). With huggingface_hub 1.20.1
+(Thor's installed version) two checks fail:
+  (a) @strict requires the class to ALREADY be a @dataclass.
+  (b) @strict treats any method named `validate_*` as a class validator that
+      must take only (self). PretrainedConfig (transformers 5.3.0) inherits
+      `validate_rope` from RotaryEmbeddingConfigMixin which takes extra args.
+
+Fix on Thor: dropped @strict entirely, kept @dataclass — runtime behavior is
+identical (lerobot/src/lerobot/policies/groot/groot_n1.py around line 181):
+
+    # was:    @strict
+    # now:    @dataclass
+
+If WS has a newer huggingface_hub (1.21+ might auto-apply dataclass and be
+more lenient about validate_*), this hack may not be needed. Test by importing
+factory and see if groot import errors. WS solution may be: just upgrade
+huggingface_hub instead of patching the file.
+
+
+THE 3 LOCAL HARDWARE PATCHES (re-applied after rsync)
+-----------------------------------------------------
+These are NOT optional on Thor — without them the cameras and arm break.
+WS doesn't have the robot or RealSense plugged in, so it may NOT need them.
+
+A) lerobot/src/lerobot/cameras/realsense/camera_realsense.py
+   Added a 3-attempt retry loop around the warmup phase of connect().
+   Upstream has a single-attempt connect that times out reliably when 3 cameras
+   share USB bandwidth. The retry restarts the rs.pipeline between attempts.
+   ~50 lines added inside the connect() method (between rs.pipeline() and the
+   final logger.info("connected")).
+   WS likely does NOT need this — no RealSense.
+
+B) lerobot/src/lerobot/robots/so_follower/robot_kinematic_processor.py
+   In EEBoundsAndSafety.action() (around line 224), REMOVED the line
+       raise ValueError(f"EE jump {n:.3f}m > {self.max_ee_step_m}m")
+   The clamping logic still runs; the raise was killing the recording loop on
+   any tele-op step > max_ee_step_m, even though we'd already clamped to safe.
+   WS doesn't run real robot — irrelevant unless WS does sim teleop.
+
+C) lerobot/src/lerobot/policies/groot/groot_n1.py
+   Our OLD patch (field(init=False) → field(default=None) for Python 3.12)
+   is OBSOLETE — upstream rewrote the config entirely (no more dataclass
+   fields with init=False). We did NOT re-apply that patch. What we DID add
+   is the @strict→@dataclass swap described in GOTCHA 2.
+
+Backups of all 3 patches (relative to OUR old HEAD baseline) are saved at
+/tmp/lerobot-mods-backup/ on Thor:
+  camera_realsense.py.{HEAD,WORKING,patch}
+  robot_kinematic_processor.py.{HEAD,WORKING,patch}
+  groot_n1.py.{HEAD,WORKING,patch}
+
+And a git safety branch on Thor pins the pre-update state:
+  git branch lerobot-pre-update-backup   # points at outer-repo commit 7deebcd
+
+
+FILES UPSTREAM REMOVED (rsync --delete handled these)
+-----------------------------------------------------
+These don't exist in upstream 49755a3d anymore. If WS code imports any of
+them, expect breakage:
+  lerobot/src/lerobot/datasets/transforms.py
+  lerobot/src/lerobot/policies/sac/         (full directory)
+  lerobot/src/lerobot/policies/sarm/        (full directory)
+  lerobot/src/lerobot/rl/process.py
+  lerobot/src/lerobot/rl/wandb_utils.py
+  lerobot/src/lerobot/utils/control_utils.py     ← moved to lerobot/common/control_utils.py
+  lerobot/src/lerobot/utils/train_utils.py
+  lerobot/src/lerobot/utils/rabc.py
+
+`init_keyboard_listener` is now at `lerobot.common.control_utils`. On Thor
+the file ee/record.py still imports from the OLD path; we are NOT using
+ee/record.py anymore (replaced by the lerobot-record CLI per ee/RECORDING_SHEET_v4.txt),
+so it's left as-is. If WS code uses init_keyboard_listener, update the import.
+
+
+WHAT'S NEW UPSTREAM (relevant additions)
+----------------------------------------
+  lerobot/src/lerobot/processor/relative_action_processor.py   ← what we needed
+  lerobot/src/lerobot/policies/pi05/                           ← what we needed
+  lerobot/src/lerobot/common/                                  ← new common-utils namespace
+  lerobot/src/lerobot/policies/eo1, gaussian_actor, molmoact2, vla_jepa
+  lerobot/src/lerobot/rl/algorithms/, trainer.py, train_rl.py
+
+
+VERIFICATION ON THOR (you can re-run any of these on WS to check parity)
+------------------------------------------------------------------------
+1) Imports:
+   conda run -n lerobot python -c "
+   from lerobot.processor.relative_action_processor import *
+   from lerobot.policies.factory import get_policy_class
+   print(get_policy_class('pi05'))"
+
+   Expect: <class 'lerobot.policies.pi05.modeling_pi05.PI05Policy'>
+
+2) Versions:
+   conda run -n lerobot pip show lerobot          | grep Version  # 0.5.2
+   conda run -n lerobot pip show transformers     | grep Version  # 5.3.0 on Thor
+   conda run -n lerobot pip show huggingface_hub  | grep Version  # 1.20.1 on Thor
+
+3) Checkpoint load + run (Thor only — needs the arm + cameras):
+   sudo chmod 666 /dev/ttyACM*
+   conda run -n lerobot python ee/vla_server.py \
+       --checkpoint /home/robot/dev/lerebot/ckpt_v4_008000 \
+       --n-action-steps 10
+
+
+ROLLBACK (if anything goes wrong on Thor or you need to redo it)
+----------------------------------------------------------------
+The 3 patches + a git safety branch make rollback cheap:
+
+  cd /home/robot/dev/lerebot
+  git checkout lerobot-pre-update-backup -- lerobot/   # restore tree
+  # then re-pip install
+  conda run -n lerobot pip install -e lerobot --no-deps
+
+
+WHAT THE WS NEEDS TO DO NEXT (the actual pipeline)
+--------------------------------------------------
+Per ee/RECORDING_SHEET_v4.txt steps 2-5 (Thor already finished step 1):
+
+  Step 2 [WS]  hf download sari-abdan/vial-sort-v4-new --repo-type dataset \
+                  --local-dir ./data/vial-sort-v4-new
+               python ee/convert_dataset.py --src ./data/vial-sort-v4-new \
+                  --dst ./data/vial-sort-v4-new-ee --urdf ./SO101/so101_new_calib.urdf
+
+  Step 3 [WS]  python ee/paraphrase_tasks.py --root ./data/vial-sort-v4-new-ee \
+                  --repo-id sari-abdan/vial-sort-v4-new-ee
+
+  Step 4 [WS]  python ee/merge_v4.py        # ~118 episodes
+
+  Step 5 [WS]  bash ee/train_pi05_v4.sh     # the pi05 train run
+
+The newly-pushed dataset is at:
+  https://huggingface.co/datasets/sari-abdan/vial-sort-v4-new
+  (40 episodes, 21,414 frames, 3 task labels — A right-pos6, B left-pos1, C left-pos6)
+
+
+WHAT THIS HANDOFF DOC DOES NOT COVER
+------------------------------------
+• Whether `train_pi05_v4.sh` works on the WS's existing lerobot install — if
+  WS lerobot is also pre-pi05, the WS will need the same upstream update before
+  training will recognize `--policy.type pi05`. Same recipe applies.
+• `pi05` weight conversion or any format quirks — none surfaced during the Thor
+  load test, all weights loaded successfully (see RESULTS section).
+
+
+RESULTS OF THE THOR LOAD TEST (end of 2026-06-30 session)
+---------------------------------------------------------
+Ran:  python ee/vla_server.py --checkpoint /home/robot/dev/lerebot/ckpt_v4_008000 \
+                              --n-action-steps 10
+Log: /tmp/vla_server.log
+
+✅ Policy loaded cleanly:
+   policy class: PI05Policy  (type=pi05)
+   ✓ Loaded state dict from model.safetensors
+   All keys loaded successfully!
+   n_action_steps overridden -> 10 (was checkpoint default)
+   (Two harmless WARNING:root lines about vision tower patch_embedding keys —
+    just LeRobot noting key normalization, NOT a missing-weights issue.)
+
+✅ Cameras connected (no errors in the connect path, retry loop never triggered).
+
+❌ Arm motor connect failed in configure() → enable_torque:
+   ConnectionError: Failed to write 'Torque_Enable' on id_=3 ...
+   [TxRxResult] There is no status packet!
+   Hardware: motor id=3 (elbow_flex) unresponsive. Per CLAUDE.md = power-cycle
+   the arm + sudo chmod 666 /dev/ttyACM*. Unrelated to the lerobot update.
+
+
+HEADS-UP — TRAIN/INFERENCE TRANSFORMERS SKEW (decide by behavior)
+-----------------------------------------------------------------
+WS trained pi05 v4 with transformers==5.5.4. Thor runs transformers==5.3.0
+(deliberately kept; 5.4+ severed pi0 vision attention historically — see
+GOTCHA 1 above and the "Thor Deployment Fixes" memory).
+
+Weights load cleanly across the skew — "All keys loaded successfully!" on
+Thor — so there's no shape/key mismatch. The risk is the same flavor of
+silent vision-attention skew that bit pi0 at 5.10.2.
+
+Decision rule for the eval (once the arm is power-cycled and pi05 is running):
+  • Policy tracks the vial / roughly follows prompts (even imperfectly) →
+    5.3.0 is fine for pi05; do nothing.
+  • Policy is BLIND — random/dead motion, ignores the scene, like the old
+    0/10 smoke tests → it's the same skew. Fix on Thor:
+        conda run -n lerobot pip install 'transformers==5.5.4' --no-deps
+    Re-run vla_server. This WILL break pi0 inference, but v4 doesn't use pi0
+    so it's acceptable.
+
+Don't preemptively bump — staying at 5.3.0 keeps pi0/pi05 parity if it works.
+=========================================================================

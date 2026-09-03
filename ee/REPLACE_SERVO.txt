@@ -1,0 +1,132 @@
+====================================================================
+ CURRENT STATE (2026-07-10): follower=ACM0 all 6 IDs OK.
+ LEADER (ACM1) broken: its shoulder_pan was accidentally programmed
+ to ID 2 -> now TWO motors at ID 2 on the leader bus (collision).
+ Plan: A) fix leader shoulder_pan back to ID 1
+       B) calibrate ONLY the follower's new shoulder_lift
+       C) teleop gate
+====================================================================
+
+--- A: fix the LEADER's shoulder_pan (back to ID 1) ------------------
+# wiring: connect the LEADER's shoulder_pan motor (the base-rotation
+# one, the one you accidentally re-ID'd) ALONE to the leader board —
+# unplug its link to the next motor. Board on /dev/ttyACM1.
+conda run -n lerobot --no-capture-output python -c "
+from lerobot.motors.feetech import FeetechMotorsBus
+from lerobot.motors import Motor, MotorNormMode
+bus = FeetechMotorsBus(port='/dev/ttyACM1',
+    motors={'shoulder_pan': Motor(1, 'sts3215', MotorNormMode.DEGREES)})
+bus.setup_motor('shoulder_pan')
+print('OK: leader shoulder_pan restored -> ID=1')
+"
+# rebuild the leader chain, then verify all 6 answer:
+conda run -n lerobot --no-capture-output python -c "
+from lerobot.motors.feetech import FeetechMotorsBus
+print(FeetechMotorsBus.scan_port('/dev/ttyACM1'))
+"
+# expect {1000000: [1, 2, 3, 4, 5, 6]}.  NO leader recalibration
+# needed: same motors, same IDs as when its calibration was made.
+
+--- B: calibrate ONLY the follower's new shoulder_lift (ACM0) --------
+# backup first:
+cp /home/robot/dev/lerebot/calibration/robots/so_follower/so_follower.json \
+   /home/robot/dev/lerebot/calibration/robots/so_follower/so_follower.json.bak
+
+# you will: (1) move ONLY shoulder_lift to the middle of its range,
+# ENTER; (2) sweep ONLY that joint fully up/down, ENTER.
+conda run -n lerobot --no-capture-output python -c "
+import json
+from lerobot.motors.feetech import FeetechMotorsBus
+from lerobot.motors import Motor, MotorNormMode
+
+CAL = '/home/robot/dev/lerebot/calibration/robots/so_follower/so_follower.json'
+MOTOR = 'shoulder_lift'
+
+cal = json.load(open(CAL))
+motors = {name: Motor(e['id'], 'sts3215',
+                      MotorNormMode.RANGE_0_100 if name=='gripper' else MotorNormMode.DEGREES)
+          for name, e in cal.items()}
+bus = FeetechMotorsBus(port='/dev/ttyACM0', motors=motors)
+bus._connect(handshake=False)
+bus.disable_torque()
+
+input(f'Move ONLY {MOTOR} to the MIDDLE of its range, then press ENTER...')
+homing = bus.set_half_turn_homings([MOTOR])
+print('Now sweep ONLY', MOTOR, 'through its FULL range (up and down),')
+print('then press ENTER to stop recording...')
+mins, maxes = bus.record_ranges_of_motion([MOTOR])
+
+cal[MOTOR]['homing_offset'] = int(homing[MOTOR])
+cal[MOTOR]['range_min'] = int(mins[MOTOR])
+cal[MOTOR]['range_max'] = int(maxes[MOTOR])
+json.dump(cal, open(CAL, 'w'), indent=4)
+print('PATCHED', MOTOR, 'in', CAL)
+print(cal[MOTOR])
+"
+
+# FALLBACK if the snippet errors (older lerobot API on Thor): full
+# follower recalibration (2 min, all joints, same file/id):
+conda run -n lerobot --no-capture-output lerobot-calibrate \
+    --robot.type=so101_follower --robot.port=/dev/ttyACM0 \
+    --robot.id=so_follower \
+    --robot.calibration_dir=/home/robot/dev/lerebot/calibration/robots/so_follower
+
+--- D: DIAGNOSE motor 2 not moving in teleop -------------------------
+# 0) FIRST: power-cycle the follower's servo power (unplug PSU 10 s).
+#    Overload protection LATCHES until reboot — if the joint rammed once,
+#    torque stays cut on that motor no matter what you command.
+# Is the joint limp or stiff when you push it by hand (torque on)?
+# Then run this and paste the output:
+conda run -n lerobot --no-capture-output python -c "
+from lerobot.motors.feetech import FeetechMotorsBus
+from lerobot.motors import Motor, MotorNormMode
+bus = FeetechMotorsBus(port='/dev/ttyACM0',
+    motors={'shoulder_lift': Motor(2, 'sts3215', MotorNormMode.DEGREES)})
+bus._connect(handshake=False)
+for reg in ['Operating_Mode','Torque_Enable','Present_Position',
+            'Min_Position_Limit','Max_Position_Limit','Homing_Offset',
+            'Present_Temperature','Present_Current','Protection_Current',
+            'Overload_Torque','Moving_Speed' ]:
+    try:
+        print(f'{reg:22s}', bus.read(reg, 'shoulder_lift', normalize=False))
+    except Exception as e:
+        print(f'{reg:22s} ERR {type(e).__name__}')
+"
+
+# direct move test (bypasses calibration/teleop entirely):
+# joint should visibly move a small amount, then back.
+conda run -n lerobot --no-capture-output python -c "
+import time
+from lerobot.motors.feetech import FeetechMotorsBus
+from lerobot.motors import Motor, MotorNormMode
+bus = FeetechMotorsBus(port='/dev/ttyACM0',
+    motors={'shoulder_lift': Motor(2, 'sts3215', MotorNormMode.DEGREES)})
+bus._connect(handshake=False)
+bus.write('Operating_Mode','shoulder_lift',0,normalize=False)  # position mode
+bus.write('Torque_Enable','shoulder_lift',1,normalize=False)
+p = bus.read('Present_Position','shoulder_lift',normalize=False)
+print('present:', p)
+bus.write('Goal_Position','shoulder_lift',p+150,normalize=False); time.sleep(1.5)
+print('after +150:', bus.read('Present_Position','shoulder_lift',normalize=False))
+bus.write('Goal_Position','shoulder_lift',p,normalize=False); time.sleep(1.5)
+print('back:', bus.read('Present_Position','shoulder_lift',normalize=False))
+"
+# READING THE RESULTS:
+# - Operating_Mode != 0            -> it was in wheel/speed mode (test fixes it)
+# - direct move WORKS              -> servo fine; the calibration entry is bad ->
+#                                     rerun section B (or the fallback full calibrate)
+# - direct move DOESN'T move, position frozen, current ~0
+#                                  -> torque/protection issue or wrong servo variant
+# - Present_Position jumps wildly  -> loose horn screw / spline not seated
+====================================================================
+
+--- C: the gate (before ANY real use) --------------------------------
+# 2-minute teleop; hand on the new shoulder_lift housing (warm=ok,
+# HOT=stop); zero "no status packet" errors.
+conda run -n lerobot --no-capture-output lerobot-teleoperate \
+    --robot.type=so101_follower --robot.port=/dev/ttyACM0 --robot.id=so_follower \
+    --robot.calibration_dir=/home/robot/dev/lerebot/calibration/robots/so_follower \
+    --teleop.type=so101_leader --teleop.port=/dev/ttyACM1 --teleop.id=so_leader \
+    --teleop.calibration_dir=/home/robot/dev/lerebot/calibration/teleoperators/so_leader
+# Ctrl+C to stop. If smooth + cool + no bus errors -> P0 GATE PASSED.
+====================================================================

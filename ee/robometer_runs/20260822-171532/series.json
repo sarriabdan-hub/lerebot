@@ -1,0 +1,1 @@
+{"id": "20260822-171532", "task": "Move the vial from position 6 of the left rack to the bin.", "rbm_prompt": "Pick up the vial and put it in the bin.", "duration": 32.25, "fps": null, "t": [], "progress": [], "success": [], "ctrl_end": 32.249, "rbm_end": null, "peak_progress": null, "peak_success": null, "verdict": null, "threshold": 0.5, "p_complete": 0.7, "s_complete": 0.5}

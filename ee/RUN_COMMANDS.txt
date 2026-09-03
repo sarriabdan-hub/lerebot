@@ -1,0 +1,190 @@
+=========================================================================
+ VLM -> VLA pipeline — STEP-BY-STEP RUN COMMANDS
+ Tags:  [WS]   = run on the WORKSTATION (Blackwell 6000, /home/sari/lerobot)
+        [THOR] = run on the JETSON THOR (robot@192.168.123.198, /home/robot/dev/lerebot)
+ Do the steps in order. Steps 0 and 3 are one-time setup.
+=========================================================================
+
+
+-------------------------------------------------------------------------
+ STEP 0  [WS]  Copy the latest code to Thor   (asks for Thor SSH password)
+-------------------------------------------------------------------------
+cd /home/sari/lerobot
+rsync -av ee/vla_server.py ee/planner.py ee/orchestrator.py ee/VLM_PIPELINE.md robot@192.168.123.198:/home/robot/dev/lerebot/ee/
+
+
+-------------------------------------------------------------------------
+ STEP 1  [THOR]  Start the warm VLA server (in tmux). ~3 min to load.
+                 Leave it running the whole session.
+-------------------------------------------------------------------------
+# SSH into Thor first, then:
+cd /home/robot/dev/lerebot
+tmux new-session -s vla
+/home/robot/miniforge3/envs/lerobot/bin/python ee/vla_server.py --checkpoint /home/robot/dev/lerebot/pretrained_model --port 8000
+
+# Wait until you see:  "VLA server ready on http://0.0.0.0:8000 (init done — stays warm)"
+# Then DETACH (leaves it running):   press  Ctrl+B   then   D
+#
+# tmux helpers (THOR):
+#   re-enter the server screen:   tmux attach -t vla
+#   stop the server:              tmux kill-session -t vla
+
+
+-------------------------------------------------------------------------
+ STEP 2  [WS]  Check the server is alive + cameras work  (NO robot motion)
+-------------------------------------------------------------------------
+# server alive:
+curl http://192.168.123.198:8000/health
+
+# cameras work through the server (should print: cameras: ['cam_top', 'cam_wrist', 'cam_side']):
+curl -s http://192.168.123.198:8000/observe | python3 -c "import sys,json; print('cameras:', list(json.load(sys.stdin)['images'].keys()))"
+
+
+-------------------------------------------------------------------------
+ STEP 3  [WS]  Install the FREE local VLM (Qwen2.5-VL via Ollama). ONE TIME.
+-------------------------------------------------------------------------
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull gemma3:27b
+# Planner model = gemma3:27b (strong, reliable in Ollama, ~17GB, fits the Blackwell).
+#
+# Models we ruled out:
+#   qwen2.5vl:7b   -> confabulates the scene (claims wrong vial states). Don't use.
+#   qwen2.5vl:32b  -> HTTP 500 "Failed to load CLIP model": Ollama 0.30.10 can't load
+#                     its vision projector (blob is sha-verified, so NOT corruption).
+# Pass the model with:  --model gemma3:27b
+
+
+-------------------------------------------------------------------------
+ STEP 4  [WS]  PLAN ONLY — see what the VLM decides. NO robot motion.
+               Edit the --goal text to whatever you want to test.
+               NOTE: planner.py runs on the WORKSTATION — prompt edits are live,
+               no re-sync / server restart needed.
+-------------------------------------------------------------------------
+cd /home/sari/lerobot
+
+# 4a. Scene-reading test — forces the VLM to read colors + positions from the image.
+#     Check the "Scene:" line: red ~position 6 in the upper/source rack, blue+cyan
+#     in the lower/goal rack. (Slot numbering: position 1 = nearest the arm, 6 = far end.)
+.venv/bin/python ee/orchestrator.py --server http://192.168.123.198:8000 --goal "complete vial sort" --model gemma3:27b --plan-only
+
+# 4b. Specific placement test — destination N comes from YOU, not the image.
+.venv/bin/python ee/orchestrator.py --server http://192.168.123.198:8000 --goal "put the red vial in the right rack position 6" --model gemma3:27b --plan-only
+
+
+-------------------------------------------------------------------------
+ STEP 5  [WS]  REAL RUN — moves the arm. Put a vial in the rack FIRST.
+               Confirms each step:  Enter = go,  s = skip,  q = quit.
+-------------------------------------------------------------------------
+cd /home/sari/lerobot
+.venv/bin/python ee/orchestrator.py --server http://192.168.123.198:8000 --goal "complete vial sort" --model gemma3:27b --duration 30
+
+
+=========================================================================
+ OPTIONAL — drive the robot WITHOUT the VLM (direct command)
+ Useful to test the arm alone. base_v1 ignores the text anyway.
+ [WS]  ⚠ moves the arm — position a vial first.
+=========================================================================
+curl -X POST http://192.168.123.198:8000/execute -H "Content-Type: application/json" -d "{\"task\":\"place the vial in the right rack position 3\",\"duration\":30}"
+
+
+=========================================================================
+ CV SLOT READER  [WS]  — reliable scene perception (no VLM)
+ Detects vials by color (bounding boxes) and maps each to rack + slot number.
+ Free, local, instant. The VLA server must be running (STEP 1).
+=========================================================================
+# read the scene -> annotated image (/tmp/slot_read.jpg) + structured state:
+cd /home/sari/lerobot
+.venv/bin/python ee/slot_reader.py
+# then open /tmp/slot_read.jpg in any image viewer to see the boxes.
+# (--show needs a GUI OpenCV build; this workstation's is headless, so use the file.)
+
+# A starter calibration is already saved and reads correctly. Only recalibrate if the
+# grid drifts or the camera moves. Headless calibration (no window):
+.venv/bin/python ee/slot_reader.py --grid          # saves /tmp/slot_grid.jpg with a pixel grid
+# open /tmp/slot_grid.jpg, read the (x,y) of the 4 rack-END holes, then:
+.venv/bin/python ee/slot_reader.py --calibrate-coords "Lx1,Ly1 Lx6,Ly6 Rx1,Ry1 Rx6,Ry6"
+#   order: LEFT pos1(near arm), LEFT pos6(far), RIGHT pos1(near arm), RIGHT pos6(far)
+# calibration saved to ee/slot_calib.json
+
+# Example output:
+#   SCENE: {"left": {"5": "red"}, "right": {"6": "cyan"}, "unassigned": []}
+#     left rack: pos5=red
+#     right rack: pos6=cyan
+
+
+=========================================================================
+ FULL PIPELINE: CV perception -> command -> VLA execution (no VLM needed)
+=========================================================================
+# A. [WS] Put the FULL-FT checkpoint on Thor (8.3GB; asks for SSH password):
+cd /home/sari/lerobot
+rsync -av --delete outputs/train/vial-sort-pi0-fullft/checkpoints/last/pretrained_model/ robot@192.168.123.198:/home/robot/dev/lerebot/pretrained_model/
+
+# B. [THOR] Restart the server so it loads the fullft (~3 min):
+tmux kill-session -t vla
+cd /home/robot/dev/lerebot
+tmux new-session -s vla
+/home/robot/miniforge3/envs/lerobot/bin/python ee/vla_server.py --checkpoint /home/robot/dev/lerebot/pretrained_model --port 8000
+#   wait for "VLA server ready", then Ctrl+B then D
+
+# C. [WS] Run the pipeline — CV reads scene, builds the command, robot executes.
+#    ⚠ moves the arm; put the vial in the LEFT rack first.
+cd /home/sari/lerobot
+# TERMINAL mode (no browser) — plan-only writes the annotated grid to /tmp/slot_read.jpg:
+.venv/bin/python ee/cv_run.py --dest-pos 3 --plan-only     # dry: show scene + grid + command, NO motion
+.venv/bin/python ee/cv_run.py --dest-pos 3 --cli           # real: execute on robot (asks to confirm)
+.venv/bin/python ee/cv_run.py --dest-pos 3 --cli --yes     # real: execute, no confirmation prompt
+
+
+=========================================================================
+ WEB CONTROL PANEL  [WS]  — cv_run.py with no flags = the dashboard
+ 3 big live cameras, the VLA's path drawn live (green trail + red head),
+ green/amber/red glow per state, CV "Analyze scene" (same grid check as
+ --plan-only, in the browser), and Home / Execute buttons with durations.
+ Needs the (now threaded) vla_server.py from STEP 1 running on Thor.
+=========================================================================
+cd /home/sari/lerobot
+.venv/bin/python ee/cv_run.py --open                       # serve UI + open browser (http://127.0.0.1:8088)
+.venv/bin/python ee/cv_run.py --dest-pos 3 --open          # ...with destination pre-selected
+# "Analyze scene" = dry CV/grid check (no motion).  "Execute" / "Home" move the arm.
+
+
+=========================================================================
+ HOME THE ARM  — move it to the rest pose anytime (no robot re-init)
+ The move interpolates from wherever the arm currently is, so it's safe
+ even if the arm is in a weird spot after a bad placement.
+ ⚠ moves the arm. Requires the server (STEP 1) running with the /home code.
+=========================================================================
+# [WS] default home pose:
+.venv/bin/python ee/home.py
+# [WS] slower / gentler:
+.venv/bin/python ee/home.py --duration 6
+# [WS] tune the pose (body joints -100..100, 0=center; gripper 0..100):
+.venv/bin/python ee/home.py --pose "shoulder_lift.pos=-20 gripper.pos=80"
+# or raw curl:
+curl -X POST http://192.168.123.198:8000/home -H "Content-Type: application/json" -d "{\"duration\":4}"
+#
+# To change the DEFAULT home pose permanently, edit HOME_POSE at the top of
+# ee/vla_server.py, then re-sync the server + restart it.
+
+
+=========================================================================
+ NOTES
+=========================================================================
+- base_v1 (the 100-episode full-FT checkpoint) was trained on ONE exact sentence:
+  "Place the red vial in position 3 of the right rack." It does NOT understand
+  paraphrases or other positions — a different string is OUT-OF-DISTRIBUTION and
+  degrades the grab. cv_run.py sends this exact sentence by default. Real
+  prompt-following (any phrasing, any position N) comes after the varied-label retrain.
+
+- The VLM uses the TOP camera as primary (best for reading the 1x6 grid), with
+  the side camera as secondary context. Top-view geometry baked into planner.py:
+  arm on the RIGHT; upper row = source/"left" rack; lower row = goal/"right" rack;
+  slot numbering position 1 = nearest the arm, position 6 = far boundary.
+
+- To run Qwen ON THOR instead of the workstation (frees the Blackwell for
+  training): on Thor run  ollama pull qwen2.5vl:7b , then add this flag to the
+  orchestrator in Steps 4/5:   --ollama-url http://192.168.123.198:11434
+
+- If Steps 2/4 hang from the workstation but   curl http://localhost:8000/health
+  works ON Thor, it's a network/firewall issue between the two machines — tell me.
+=========================================================================

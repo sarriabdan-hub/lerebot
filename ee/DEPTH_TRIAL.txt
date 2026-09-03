@@ -1,0 +1,108 @@
+====================================================================
+ DEPTH TRIAL — 10 throwaway episodes, own dataset, JUST to prove depth
+ records. NOT v5 pilot data. All commands run ON THOR.
+====================================================================
+
+### 0. THE ONE THING THAT DECIDES IF THIS WORKS ###
+`"use_depth": true` ALONE RECORDS NOTHING. Stock so_follower.get_observation()
+only reads the COLOUR frame; the driver fills latest_depth_frame but nothing
+surfaces it, and _cameras_ft never declares a depth feature.
+=> The 3-hunk patch in ee/DEPTH_PLAN.md ("Thor patch") MUST be applied to
+   Thor's src/lerobot/robots/so_follower/so_follower.py first:
+     1) colorize_depth()  — FIXED map, clip 0.25-1.20 m, JET, invalid->black
+                            (never per-frame autoscale: it would destroy the
+                             pixel<->distance meaning between frames)
+     2) _cameras_ft()     — declare "cam_depth" (H, W, 3)
+     3) get_observation() — emit obs_dict["cam_depth"] = colorize_depth(...)
+Check it's applied:
+    grep -n "colorize_depth" ~/dev/lerebot/lerobot/src/lerobot/robots/so_follower/so_follower.py
+No output -> NOT patched -> depth WILL be silently missing. Stop and patch.
+
+### 1. cameras (v4 JSON + depth ON the RealSense) ###
+export CAMS='{"cam_top": {"type": "opencv", "index_or_path": "/dev/v4l/by-path/platform-a80aa10000.usb-usb-0:4.2.2:1.0-video-index0", "fps": 30, "width": 640, "height": 480, "fourcc": "MJPG"}, "cam_wrist": {"type": "opencv", "index_or_path": "/dev/v4l/by-path/platform-a80aa10000.usb-usb-0:4.2.4:1.0-video-index0", "fps": 30, "width": 640, "height": 480, "fourcc": "MJPG"}, "cam_side": {"type": "intelrealsense", "serial_number_or_name": "052622071016", "fps": 30, "width": 640, "height": 480, "warmup_s": 3, "use_depth": true}}'
+
+### 2. RECORD 10 EPISODES into its OWN dataset ###
+# stop the VLA server first (it holds the cameras + motor bus):
+pkill -f "ee/vla_server.py"
+
+lerobot-record \
+  --robot.type=so101_follower --robot.port=/dev/ttyACM0 --robot.id=so_follower \
+  --robot.calibration_dir=/home/robot/dev/lerebot/calibration/robots/so_follower \
+  --robot.cameras="$CAMS" \
+  --teleop.type=so101_leader --teleop.port=/dev/ttyACM1 --teleop.id=so_leader \
+  --teleop.calibration_dir=/home/robot/dev/lerebot/calibration/teleoperators/so_leader \
+  --dataset.repo_id=sari-abdan/depth-trial-pi05 \
+  --dataset.root=/home/robot/depth_trial_pi05 \
+  --dataset.num_episodes=10 \
+  --dataset.episode_time_s=30 --dataset.reset_time_s=15 \
+  --dataset.push_to_hub=False --display_data=true \
+  --dataset.single_task="Place the red vial in position 3 of the right rack."
+# controls: ->  save & next | <-  redo | ESC stop
+
+### 3. VERIFY DEPTH IS REALLY IN THERE (the whole point) ###
+ls /home/robot/depth_trial_pi05/videos/
+#   MUST list: observation.images.cam_depth   (plus cam_top / cam_wrist / cam_side)
+python -c "
+import json; i=json.load(open('/home/robot/depth_trial_pi05/meta/info.json'))
+print('episodes:', i['total_episodes'])
+print([k for k in i['features'] if 'image' in k])"
+# a depth video that is all-black or all-one-colour = colorize range wrong.
+
+====================================================================
+ HYPERPARAMETERS THAT ACTUALLY MATTER (and their real values)
+====================================================================
+
+--- A. RECORDING (this trial) ---------------------------------------
+use_depth               TRUE   <- the depth stream (needs the patch above!)
+fourcc MJPG             set    <- on cam_top/cam_wrist. Fixes the USB-bandwidth
+                                  starvation that killed the RealSense before.
+fps / width / height    30 / 640x480   all 4 streams, must match v4
+dataset.episode_time_s  30     max seconds per episode (hit -> to save early)
+dataset.reset_time_s    15     pause between episodes to reset the scene
+dataset.push_to_hub     FALSE  <- keeps it local; upload manually later
+display_data            true   live viewer while recording
+--resume                (omit) <- ONLY for run 1 / a fresh dataset. Add
+                                  --resume=true to APPEND to an existing one.
+
+--- B. pi0.5-v4 TRAINING (what the running ckpt actually used) -------
+policy.type                    pi05
+freeze_vision_encoder   TRUE   <- vision tower FROZEN
+train_expert_only       TRUE   <- only the action expert trains
+                                  ^ these two = few trainable params = why
+                                    pi0.5 works on only 118 episodes
+image_transforms.enable TRUE   <- augmentation (camera-shift/lighting defence)
+optimizer_lr                   1e-4
+batch_size                     16
+steps                          30000  (best ckpt by ROBOT eval: 16000)
+chunk_size / n_action_steps    50 / 50 (training)
+
+--- C. GR00T-v4 TRAINING (for contrast — why it overfit) -------------
+policy.type                    groot
+tune_llm                FALSE  <- LLM frozen (protects language grounding)
+tune_visual             TRUE   <- vision UNFROZEN
+tune_projector          TRUE
+tune_diffusion_model    TRUE
+lora_rank                      0      (LoRA OFF = full fine-tune)
+batch_size / steps             16 / 20000
+>>> tune_visual+projector+DiT = ~1.5B trainable params on 118 episodes.
+    That is the overfit that made it grab nothing. Fixes for v5: more data,
+    or lora_rank 32, or tune_visual FALSE.
+
+--- D. DEPLOYMENT (vla_server.py) -----------------------------------
+--n-action-steps        15 for pi0.5 / 16 for GR00T  <- chunk actually executed
+--async-chunks          ON     infer next chunk while executing current
+--filter oneeuro        ON     1-Euro smoothing (jitter was 0.988 deg = good)
+--euro-min-cutoff 0.3 / --euro-beta 0.02
+--record-video --record-cam cam_wrist    grip close-ups for scoring
+safety watchdog         ON by default: 55 C / 1400 mA -> stop + torque off
+python -u               USE IT  <- unbuffered stdout, so "ready" prints live
+--ik-seed-last / --ik-prev-solution   NEVER. These burned a servo.
+
+--- E. FLAGS THAT ARE FALSE/OFF AND SHOULD STAY THAT WAY -------------
+push_to_hub             FALSE  (upload deliberately, not mid-recording)
+lora_rank               0      (pi0.5's LoRA run failed before; full FT works)
+tune_llm                FALSE  (unfreezing it = catastrophic forgetting of
+                                language on 118-200 episodes)
+use_fabric              (default TRUE, sim only) — turning it off froze physics
+--skip-preflight        off    (the RealSense USB3 preflight saves you 13 min)
+====================================================================

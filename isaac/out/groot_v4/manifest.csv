@@ -1,0 +1,13 @@
+video,task,ground_truth
+isaac/out/groot_v4/groot_3000_ep0.mp4,Place the red vial in position 1 of the left rack.,
+isaac/out/groot_v4/groot_3000_ep1.mp4,Place the red vial in position 3 of the left rack.,
+isaac/out/groot_v4/groot_3000_ep2.mp4,Place the red vial in position 6 of the left rack.,
+isaac/out/groot_v4/groot_3000_ep3.mp4,Place the red vial in position 6 of the right rack.,
+isaac/out/groot_v4/groot_5000_ep0.mp4,Place the red vial in position 1 of the left rack.,
+isaac/out/groot_v4/groot_5000_ep1.mp4,Place the red vial in position 3 of the left rack.,
+isaac/out/groot_v4/groot_5000_ep2.mp4,Place the red vial in position 6 of the left rack.,
+isaac/out/groot_v4/groot_5000_ep3.mp4,Place the red vial in position 6 of the right rack.,
+isaac/out/groot_v4/groot_7000_ep0.mp4,Place the red vial in position 1 of the left rack.,
+isaac/out/groot_v4/groot_7000_ep1.mp4,Place the red vial in position 3 of the left rack.,
+isaac/out/groot_v4/groot_7000_ep2.mp4,Place the red vial in position 6 of the left rack.,
+isaac/out/groot_v4/groot_7000_ep3.mp4,Place the red vial in position 6 of the right rack.,

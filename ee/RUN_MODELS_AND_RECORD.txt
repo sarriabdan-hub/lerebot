@@ -1,0 +1,252 @@
+====================================================================
+ RUNBOOK — 1) GR00T autonomous  2) pi0.5 autonomous  3) record 50 +depth
+ Every command is tagged [WS] or [THOR]. WS=192.168.123.170  THOR=...198
+ Arm back online (new shoulder_lift, P0 gate passed 2026-07-10).
+====================================================================
+
+WHAT WE ACTUALLY TRAINED (checked 2026-07-10):
+  GR00T-v4  : vision UNFROZEN, batch16, 20k steps, 20 ckpts. deploy -n 16
+  pi0.5-v4  : vision FROZEN (freeze_vision_encoder=True, train_expert_only=
+              True), batch16, 30k steps, 15 ckpts. deploy -n 15
+  >>> There is NO unfrozen pi0.5 run. Only GR00T was unfrozen. The unfrozen
+      pi0.5 leg is P5 of ee/ROADMAP_v5.md — it happens on the NEW v5 data.
+  Both trained on the SAME dataset (vial-sort-v4-merged-ee) = clean A/B.
+  Pick by ROBOT eval, never by loss.
+
+####################################################################
+# PART 1 — GR00T FIRST
+####################################################################
+
+--- 1.1 [WS] copy the checkpoint to Thor (5.1 GB) -------------------
+cd /home/sari/lerobot
+rsync -av --progress \
+  outputs/train/vial-sort-groot-v4/checkpoints/005000/pretrained_model/ \
+  robot@192.168.123.198:/home/robot/dev/lerebot/ckpt_groot_v4_5000/
+
+--- 1.2 [THOR] one-time GR00T deps (NOT flash-attn, NOT decord) ------
+# decord has NO aarch64 wheel and is ONLY a training-time video backend
+# (configuration_groot.py video_backend) -- never imported at inference.
+# So on Thor OMIT decord. diffusers is already present.
+conda run -n lerobot --no-capture-output pip install dm-tree timm ninja
+
+# FlashAttention patch -- ALREADY APPLIED (2026-07-18) to Thor's copy of
+#   src/lerobot/policies/groot/eagle2_hg_model/modeling_eagle2_5_vl.py
+# The one-spot patch below is NOT enough: the file ALSO hardcodes
+# flash_attention_2 for the vision tower (line ~108) and ASSERTS it for the
+# Qwen text model (line ~122). All THREE were patched to fall back to sdpa
+# when flash_attn is absent. If you ever re-clone/reset lerobot, re-apply all
+# three. Guard inserted BEFORE super().__init__(config):
+#     import importlib.util as _ilu
+#     _no_fa = _ilu.find_spec("flash_attn") is None
+#     if _no_fa:
+#         for _c in (config, getattr(config,"vision_config",None),
+#                    getattr(config,"text_config",None)):
+#             if _c is not None:
+#                 _c._attn_implementation = "sdpa"
+#                 _c._attn_implementation_autoset = True
+#   line ~108: vision_config._attn_implementation = "sdpa" if _no_fa else "flash_attention_2"
+#   line ~122: assert ... in ("flash_attention_2", "sdpa")
+# After re-applying, clear the caches so the vendor file regenerates:
+rm -rf ~/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5
+rm -rf ~/.cache/huggingface/modules/transformers_modules/eagle2hg_*
+
+--- 1.3 [THOR] RUN GR00T AUTONOMOUSLY -------------------------------
+# clear the workspace first. Hand near the power switch.
+# Safety watchdog is ON by default (55 C / 1400 mA -> stop + torque off).
+conda run -n lerobot --no-capture-output \
+  python /home/robot/dev/lerebot/ee/vla_server.py \
+  --checkpoint /home/robot/dev/lerebot/ckpt_groot_v4_5000 \
+  --n-action-steps 16 --async-chunks \
+  --filter oneeuro --euro-min-cutoff 0.3 --euro-beta 0.02 \
+  --record-video --record-cam cam_wrist \
+  --log-file /tmp/vla_runs.jsonl 2>&1 | tee /tmp/vla_groot.log
+# Ctrl+C stops. Try ckpt 5000 first; if weak, rsync 003000 or 007000.
+
+####################################################################
+# PART 2 — pi0.5 (same server, only 2 flags differ)
+####################################################################
+
+--- 2.1 [WS] copy the checkpoint (8.8 GB) ---------------------------
+cd /home/sari/lerobot
+rsync -av --progress \
+  outputs/train/vial-sort-pi05-v4/checkpoints/016000/pretrained_model/ \
+  robot@192.168.123.198:/home/robot/dev/lerebot/ckpt_pi05_v4_16000/
+
+--- 2.2 [THOR] RUN pi0.5 AUTONOMOUSLY -------------------------------
+# NOTE: the pi0.5 v4 16000 ckpt already on Thor is dir  ckpt_v4_016000
+# (config type=pi05), NOT ckpt_pi05_v4_16000. Use the real path below.
+conda run -n lerobot --no-capture-output \
+  python /home/robot/dev/lerebot/ee/vla_server.py \
+  --checkpoint /home/robot/dev/lerebot/ckpt_v4_016000 \
+  --n-action-steps 15 --async-chunks \
+  --filter oneeuro --euro-min-cutoff 0.3 --euro-beta 0.02 \
+  --record-video --record-cam cam_wrist \
+  --log-file /tmp/vla_runs.jsonl 2>&1 | tee /tmp/vla_pi05.log
+# no extra deps needed for pi0.5. Alternatives on Thor: ckpt_v4_012000 / ckpt_v4_030000.
+
+--- 2.3 SCORE BOTH THE SAME WAY (ee/EVAL_TRIALS_groot_v4.md) --------
+# 12 trials each: 4 destinations x 3 source slots, same prompts.
+# per trial mark 0/1: A approach  B first-try grip  C carry
+#                     D placement  E prompt-followed
+# E-rate = the language test (the reason GR00T was trained).
+# B-rate = grip quality. Compare wrist videos side by side.
+
+####################################################################
+# PART 3 — RECORD 50 EPISODES **WITH DEPTH**   (all [THOR])
+####################################################################
+
+--- 3.1 PRE-FLIGHT #1: RealSense must be USB 3 (5000M / "USB 3.x") --
+lsusb -t | grep -A2 -i 8086
+python -c "
+import pyrealsense2 as rs
+for d in rs.context().query_devices():
+    print(d.get_info(rs.camera_info.name), '-> USB',
+          d.get_info(rs.camera_info.usb_type_descriptor))"
+
+--- 3.2 PRE-FLIGHT #2: PATCH so_follower.py (MANDATORY) -------------
+# use_depth:true ALONE RECORDS NOTHING: stock get_observation() only reads
+# the colour frame. The 3-hunk patch (colorize_depth + _cameras_ft +
+# get_observation) is in ee/DEPTH_PLAN.md -> section "Thor patch".
+# Apply BY HAND to Thor's copy (do NOT scp the WS file over Thor's
+# camera fixes). Fixed colormap: clip 0.25-1.20 m, never per-frame autoscale.
+
+--- 3.3 the two env vars (paste both, one line each) ----------------
+export CAMS='{"cam_top": {"type": "opencv", "index_or_path": "/dev/v4l/by-path/platform-a80aa10000.usb-usb-0:4.2.2:1.0-video-index0", "fps": 30, "width": 640, "height": 480, "fourcc": "MJPG"}, "cam_wrist": {"type": "opencv", "index_or_path": "/dev/v4l/by-path/platform-a80aa10000.usb-usb-0:4.2.4:1.0-video-index0", "fps": 30, "width": 640, "height": 480, "fourcc": "MJPG"}, "cam_side": {"type": "intelrealsense", "serial_number_or_name": "052622071016", "fps": 30, "width": 640, "height": 480, "warmup_s": 3, "use_depth": true}}'
+
+export COMMON="--robot.type=so101_follower --robot.port=/dev/ttyACM0 --robot.id=so_follower --robot.calibration_dir=/home/robot/dev/lerebot/calibration/robots/so_follower --teleop.type=so101_leader --teleop.port=/dev/ttyACM1 --teleop.id=so_leader --teleop.calibration_dir=/home/robot/dev/lerebot/calibration/teleoperators/so_leader --dataset.repo_id=sari-abdan/vial-sort-v5-pilot --dataset.root=/home/robot/my_local_data_v5 --dataset.episode_time_s=30 --dataset.reset_time_s=15 --dataset.push_to_hub=False --display_data=true"
+
+--- 3.4 THROWAWAY TEST (2 eps) — proves depth is written ------------
+lerobot-record $COMMON --robot.cameras="$CAMS" --dataset.num_episodes=2 \
+    --dataset.root=/home/robot/depth_test --dataset.repo_id=sari-abdan/depth-test \
+    --dataset.single_task="depth test"
+ls /home/robot/depth_test/videos/
+#   MUST list observation.images.cam_depth
+#   if not -> 3.2 patch isn't applied. STOP and fix. Then: rm -rf /home/robot/depth_test
+
+--- 3.5 THE REAL RECORDING: 50 eps = 10 runs x 5 = 2 sessions of 25 -
+# labels + per-episode vial layout come from the sheet:
+cat /home/robot/dev/lerebot/ee/initial_fable_v5.txt
+
+# RUN 1 — CREATES the dataset (NO --resume):
+lerobot-record $COMMON --robot.cameras="$CAMS" --dataset.num_episodes=5 \
+    --dataset.single_task="<run 1 label from the sheet>"
+
+# RUNS 2..10 — APPEND (identical + --resume=true, new label each run):
+lerobot-record $COMMON --robot.cameras="$CAMS" --dataset.num_episodes=5 --resume=true \
+    --dataset.single_task="<run N label from the sheet>"
+
+# controls: ->  save & next | <-  redo episode | ESC stop
+# HOME the arm before EVERY episode. Sources only from slots 1/3/4/6.
+
+--- 3.6 AFTER EACH SESSION (same day!) ------------------------------
+python /home/robot/dev/lerebot/ee/audit_labels.py \
+    --root /home/robot/my_local_data_v5 --group
+# and check the episode count grew by exactly 25 (resume appended, not overwrote)
+
+####################################################################
+# PART 4 — after the 50 eps
+####################################################################
+[THOR] huggingface-cli upload sari-abdan/vial-sort-v5-pilot \
+         /home/robot/my_local_data_v5 --repo-type dataset
+[WS]   cd /home/sari/lerobot
+[WS]   huggingface-cli download sari-abdan/vial-sort-v5-pilot --repo-type dataset \
+         --local-dir ./data/vial-sort-v5-pilot
+[WS]   .venv/bin/python ee/convert_dataset.py --src ./data/vial-sort-v5-pilot \
+         --dst ./data/vial-sort-v5-ee --urdf ./SO101/so101_new_calib.urdf
+       # remember the stats 'count' fix; cam_depth rides along as a normal video key
+[WS]   .venv/bin/python ee/paraphrase_tasks.py --root ./data/vial-sort-v5-ee
+# then P5 of ee/ROADMAP_v5.md = the 2x2: pi0.5+D, GR00T+D, pi0.5 RGB, (GR00T RGB)
+====================================================================
+
+
+####################################################################
+# SESSION LOG — 2026-07-18 (Thor). Deploying GR00T v4 5000 for a run.
+# Written by Claude. WS: READ THIS before touching Thor again.
+####################################################################
+
+GOAL: run GR00T (ckpt_groot_v4_5000) autonomously on Thor.
+OUTCOME: model + cameras + motors ALL work now; the server comes up
+READY on :8000 (idle). Blocked at the very last step by a motor-bus
+concurrency bug (see OPEN ISSUE). Everything else below is fixed.
+
+--- WHAT WAS BROKEN -> HOW IT WAS FIXED (all Thor) ------------------
+
+1. `pip install ... decord` FAILED (no aarch64 wheel).
+   decord is a TRAINING-ONLY video backend (configuration_groot.py),
+   never imported at inference. On Thor install ONLY:
+       pip install dm-tree timm ninja      (diffusers already present)
+   OMIT decord. pi0.5 needs no extra deps at all.
+
+2. GR00T load -> "FlashAttention2 ... doesn't seem to be installed".
+   flash_attn has no aarch64 wheel; Eagle backbone forces
+   flash_attention_2 in THREE spots in
+     lerobot/.../groot/eagle2_hg_model/modeling_eagle2_5_vl.py
+   PATCHED all three to fall back to sdpa when flash_attn is absent
+   (guard before super().__init__; vision tower line; Qwen assert),
+   then cleared the eagle caches. GR00T now loads clean. Re-apply if
+   lerobot is re-cloned. Full details in section 1.2 above.
+
+3. Motor bus ConnectionError on id_=4 after a prior core-dump.
+   -> power-cycle the arm + sudo chmod 666 /dev/ttyACM0. Fixed.
+
+4. vla_server appeared to HANG ~13 min after model load (looked frozen
+   at the placo self-collision warning — that is just stdout buffering
+   behind `tee`; the python prints after it are block-buffered).
+   Real cause: RealSense cam_side was on USB 2.1 -> pipeline.start()
+   blocked forever in camera warmup.
+
+5. RealSense USB saga (the big time sink):
+   - The USB-A extension cable was FAULTY -> pinned the D435i to USB 2.1.
+   - Thor's USB-C port is a UCSI/CCG dual-role port (tegra-xudc), boots
+     in DEVICE mode. Writing 'host' to
+       /sys/class/usb_role/usb2-0-role-switch/role
+     flips the data mux but does NOT source VBUS, so the camera never
+     enumerates on that USB-C port (zero kernel events on replug).
+   - FIX: RealSense on a USB-A 3.0 port with a good USB3 data cable
+     (new USB-A<->USB-C). Now USB 3.2, depth streams, 93% coverage @
+     0.30-1.01 m. Sample frames: ee/rs_color.png, ee/rs_depth.png.
+   - cam_top/cam_wrist are hardcoded by-path (4.2.2->video6,
+     4.2.4->video8) — DO NOT MOVE THEM. Baseline: ee/camera_port_baseline.txt
+
+6. Added a fast pre-flight to ee/vla_server.py so this never wastes
+   time again:
+     - preflight_realsense(): ~1s check that cam_side is present at USB3
+       BEFORE the multi-minute model load; exits with a clear message if
+       on USB2/missing.
+     - connect_robot_with_timeout(): hard 60s cap on robot+camera connect.
+     New flags: --skip-preflight, --camera-timeout <s> (default 60).
+
+--- CHECKPOINT NAMING ON THOR (differs from this runbook's labels) --
+   GR00T v4  5000 -> ckpt_groot_v4_5000
+   pi0.5 v4 16000 -> ckpt_v4_016000   (config type=pi05; NOT the runbook's
+                                       ckpt_pi05_v4_16000)
+   other pi05 v4  -> ckpt_v4_012000 / 024000 / 030000
+
+--- >>> OPEN ISSUE (blocking the run RIGHT NOW) <<< -----------------
+   Symptom: every /home and /execute returns
+     ConnectionError: Failed to sync read 'Present_Position' on
+     ids=[1..6] ... [TxRxResult] Port is in use!
+   => two things drive the Feetech serial bus (/dev/ttyACM0) at once.
+   Findings:
+     - /observe (vla_server.py ~L978) -> observe_images() reads the motor
+       bus; the home/execute loops also call follower.get_observation()
+       for the live overlay (~L818/L826/L839).
+     - The GUI polls /observe continuously -> collides with the run.
+     - Even a lock-holding /home failed, so a background reader is
+       hitting the bus OUTSIDE ROBOT_LOCK (suspect: a live-publisher /
+       stray /observe poller / async-chunk producer thread).
+   Likely fix: route EVERY follower.get_observation()/motor read through
+   ROBOT_LOCK (or a dedicated motor lock), and make /observe serve ONLY
+   buffered frames while busy (never touch the bus concurrently).
+   Workaround until fixed: do NOT open any GUI; ensure nothing polls
+   /observe, then drive by curl:
+     curl -X POST http://127.0.0.1:8000/home    -d '{"duration":4.0}'
+     curl -X POST http://127.0.0.1:8000/execute -d '{"task":"Place the red vial in position 3 of the right rack.","duration":30}'
+     curl -X POST http://127.0.0.1:8000/stop
+   (Even curl hit the error because a poller was still active -> the code
+   fix above is what's actually required.)
+
+STATE AS OF NOW: GR00T server still running on Thor :8000 (model warm,
+phase idle/error). The bus-contention fix is the ONLY thing between here
+and a real GR00T run.
+####################################################################

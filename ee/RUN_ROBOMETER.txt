@@ -1,0 +1,79 @@
+========================================================================
+ RUN GUIDE — Robometer dashboard over the pi0.5 vial-sort robot
+========================================================================
+Two machines (currently on the SAME LAN -> direct connection, no tunnel):
+  THOR  192.168.123.152  = robot + cameras + pi0.5 policy (control)     <-- CURRENT IP
+  WS    192.168.123.2    = the Robometer dashboard (GPU + the 9GB model)
+Dashboard URL: http://192.168.123.2:8010
+
+NOTE: Thor's IP keeps changing on router reconfigs. If it moves, on Thor run
+`ip a` (look at the wlP1p1s0 / eth inet), or from the WS `ping <ip>`, then relaunch
+the dashboard with the new  --server http://<thor-ip>:8000  (see step 2).
+
+------------------------------------------------------------------------
+ 1) THOR — start the robot/policy server (ON Thor). Your proven command:
+------------------------------------------------------------------------
+# cameras must read cleanly first (a loose USB cam at port 4.2.4 -> "read failed"):
+ls -l /dev/v4l/by-path/
+pkill -f vla_server.py ; lsof -ti:8000 | xargs -r kill ; sleep 2
+
+conda run -n lerobot --no-capture-output \
+  python /home/robot/dev/lerebot/ee/vla_server.py \
+  --checkpoint /home/robot/dev/lerebot/ckpt_pi05_v5_12000 \
+  --n-action-steps 15 --async-chunks \
+  --filter oneeuro --euro-min-cutoff 0.3 --euro-beta 0.02 \
+  --record-video --record-cam cam_wrist \
+  --log-file /tmp/vla_pi05_v5.log
+# WAIT for:  READY -- VLA server listening on http://0.0.0.0:8000
+# Keep --record-cam cam_wrist (NOT cam_side: recording the RealSense crashes it).
+# The dashboard scores the SIDE view via /observe regardless of --record-cam.
+
+------------------------------------------------------------------------
+ 2) WS — start the Robometer dashboard (ON the workstation), pointed at Thor
+------------------------------------------------------------------------
+tmux new -s rbm        # so it survives disconnects
+cd ~/lerobot
+ee/robometer/.venv/bin/python ee/robometer_server.py \
+  --host 0.0.0.0 --port 8010 --server http://192.168.123.152:8000
+# ~40s to load the model, then "ready: dashboard http://0.0.0.0:8010".
+# Ctrl-b then d = detach. tmux attach -t rbm = reattach.
+# If Thor's IP changed, swap it in --server above.
+
+# GOTCHA (only if you re-ran `uv sync` in ee/robometer): first do
+#   cd ee/robometer && uv pip uninstall torchao   (see ROBOMETER_SETUP_NOTES.md)
+
+------------------------------------------------------------------------
+ 3) USE IT — open in a browser on the LAN
+------------------------------------------------------------------------
+http://192.168.123.2:8010
+  Layout: Command  ->  3 live cameras (top/wrist/side)  ->  BIG Robometer graph
+  - Command: pick Source rack+pos {1,3,4,6} and Destination {left,right,bin}+slot
+    {1,3,6}; it auto-writes the prompt (editable) and auto-sets 38s bin / 42s rack.
+  - Execute & score: homes -> runs -> homes; the graph builds LIVE (~1s) while the
+    arm moves; shows SUCCESS/FAIL + success%. Bin auto-opens the gripper.
+  - VIAL SORT: the proven 5-step demo (Home -> pos4-left->bin 33s -> open gripper
+    -> Home -> pos3-right->slot3-left 38s), scores both moves.
+  - Home / Open gripper / STOP buttons; session + all-time failure rate.
+
+------------------------------------------------------------------------
+ 4) Failure-% report over all logged runs (WS, no GPU needed)
+------------------------------------------------------------------------
+cd ~/lerobot
+python ee/robometer_scoreboard.py --results ee/robometer_runs.csv --threshold 0.5
+#   -> SUCCESS n/N = X%   FAIL Y%   + breakdown by destination
+
+------------------------------------------------------------------------
+ TROUBLESHOOTING
+------------------------------------------------------------------------
+- vla_server dies with "read failed (status=False)" / "Corrupt JPEG":
+    a USB CAMERA is failing -> reseat/swap its cable (port 4.2.4), try another port.
+- "[Errno 98] Address already in use" on :8000 or :8010:
+    old server still running -> lsof -ti:<port> | xargs kill
+- Dashboard shows "unreachable" / no cameras:
+    Thor's vla_server isn't up, OR Thor's IP changed -> update --server and relaunch.
+- WS and Thor on DIFFERENT subnets (remote WS): use the SSH reverse tunnel instead
+    -> see ee/CONNECT_THOR.txt.
+- Robometer verdict feels too strict/loose: change --threshold (default 0.5).
+- The verdict is Robometer's OPINION (~60% success recognition zero-shot); the runs
+    CSV keeps an `outcome` column to correct by hand. Findings: ee/ROBOMETER_VALIDATION.md
+========================================================================

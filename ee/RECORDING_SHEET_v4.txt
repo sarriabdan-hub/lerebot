@@ -1,0 +1,146 @@
+=========================================================================
+ VIAL-SORT v4 — RECORD 40 NEW EPISODES (on THOR), same workflow as v2 sheet
+ 40 = 3 SESSIONS (A=14, B=13, C=13). Each session = ONE destination (one
+ label); the SOURCE slot VARIES across the episodes. Records JOINT-space ->
+ convert to EE afterward. We record into a NEW joint dataset so the deleted
+ old-pose episodes (orig 0-41) stay out, then MERGE with the existing 78
+ EE episodes in data/vial-sort-v4-ee.
+ Calibration: so_follower / so_leader (same as before).
+=========================================================================
+
+WHY THESE 3 DESTINATIONS: densify left pos1, left pos6, right pos6 to ~33 demos
+each (we already have ~18-20 each in v4-ee). SO-101+pi0 curve: ~100 eps/task -> ~70%.
+
+BLUE VIAL = DISTRACTOR for generalization. Keep a blue vial somewhere in the
+workspace and MOVE IT every couple of episodes (cues below) so the model learns
+to ignore clutter and only act on the RED vial named in the prompt. Never put the
+blue vial in the exact SOURCE or DEST slot the red vial uses that episode.
+
+KEY RULE: DEST is fixed per session (what the prompt commands). SOURCE varies each
+episode (cycle 1 -> 3 -> 4 -> 6). This is what makes the grab generalize.
+
+Camera: drift inside the +/-5% aug band — record at the SAME pose as existing data.
+Do NOT bump the camera between sessions.
+
+-------------------------------------------------------------------------
+ STEP 0  [THOR]  Verify calibration
+-------------------------------------------------------------------------
+  ls -la /home/robot/dev/lerebot/calibration/robots/so_follower/        # so_follower.json
+  ls -la /home/robot/dev/lerebot/calibration/teleoperators/so_leader/   # so_leader.json
+
+#########################################################################
+#  COPY-PASTE BLOCK  [THOR]
+#########################################################################
+
+# --- SETUP (once per terminal) ---
+conda activate lerobot
+sudo chmod 666 /dev/ttyACM*
+cd /home/robot/dev/lerebot
+
+export CAMS='{"cam_top": {"type": "opencv", "index_or_path": "/dev/v4l/by-path/platform-a80aa10000.usb-usb-0:4.2.2:1.0-video-index0", "fps": 30, "width": 640, "height": 480, "fourcc": "MJPG"}, "cam_wrist": {"type": "opencv", "index_or_path": "/dev/v4l/by-path/platform-a80aa10000.usb-usb-0:4.2.4:1.0-video-index0", "fps": 30, "width": 640, "height": 480, "fourcc": "MJPG"}, "cam_side": {"type": "intelrealsense", "serial_number_or_name": "052622071016", "fps": 30, "width": 640, "height": 480, "warmup_s": 3}}'
+
+# NOTE: NEW joint dataset (keeps old-pose junk out). Session A creates; B,C resume.
+export COMMON="--robot.type=so101_follower --robot.port=/dev/ttyACM0 --robot.id=so_follower --robot.calibration_dir=/home/robot/dev/lerebot/calibration/robots/so_follower --teleop.type=so101_leader --teleop.port=/dev/ttyACM1 --teleop.id=so_leader --teleop.calibration_dir=/home/robot/dev/lerebot/calibration/teleoperators/so_leader --dataset.repo_id=sari-abdan/vial-sort-v4-new --dataset.root=/home/robot/my_local_data_v4_new --dataset.episode_time_s=30 --dataset.reset_time_s=15 --dataset.push_to_hub=False --display_data=true"
+
+# Controls during recording: ->  save & continue | <-  discard & re-record | ESC stop
+
+
+-------------------------------------------------------------------------
+ SESSION A  (CREATES)  DEST = RIGHT pos 6   | 14 episodes | vial STARTS on LEFT
+ label: "Place the red vial in position 6 of the right rack."
+-------------------------------------------------------------------------
+ ep | SOURCE (left slot) | blue-vial action
+  1 |     left 1         | place blue vial at left 4
+  2 |     left 3         |
+  3 |     left 4         | (.) MOVE blue vial -> left 6
+  4 |     left 6         |
+  5 |     left 1         | (.) MOVE blue vial -> right 2
+  6 |     left 3         |
+  7 |     left 4         | (.) MOVE blue vial -> right 4
+  8 |     left 6         |
+  9 |     left 1         | (.) MOVE blue vial -> left 2
+ 10 |     left 3         |
+ 11 |     left 4         | (.) MOVE blue vial -> right 1
+ 12 |     left 6         |
+ 13 |     left 1         | (.) MOVE blue vial -> left 5
+ 14 |     left 3         |
+
+  lerobot-record $COMMON --dataset.num_episodes=14 --robot.cameras="$CAMS" --dataset.single_task="Place the red vial in position 6 of the right rack."
+
+# >>> After Session A: 14 episodes (0-13) should exist. <<<
+
+
+-------------------------------------------------------------------------
+ SESSION B  (--resume)  DEST = LEFT pos 1   | 13 episodes | vial STARTS on RIGHT
+ label: "Place the red vial in position 1 of the left rack."
+-------------------------------------------------------------------------
+ ep | SOURCE (right slot) | blue-vial action
+  1 |     right 1         | place blue vial at right 4
+  2 |     right 3         |
+  3 |     right 4         | (.) MOVE blue vial -> right 6
+  4 |     right 6         |
+  5 |     right 1         | (.) MOVE blue vial -> left 3
+  6 |     right 3         |
+  7 |     right 4         | (.) MOVE blue vial -> left 5
+  8 |     right 6         |
+  9 |     right 1         | (.) MOVE blue vial -> right 2
+ 10 |     right 3         |
+ 11 |     right 4         | (.) MOVE blue vial -> left 4
+ 12 |     right 6         |
+ 13 |     right 1         | (.) MOVE blue vial -> right 5
+
+  lerobot-record $COMMON --dataset.num_episodes=13 --resume=true --robot.cameras="$CAMS" --dataset.single_task="Place the red vial in position 1 of the left rack."
+
+# >>> After Session B: VERIFY total = 27 (appended), NOT a fresh 0-12. If overwrote, STOP. <<<
+
+
+-------------------------------------------------------------------------
+ SESSION C  (--resume)  DEST = LEFT pos 6   | 13 episodes | vial STARTS on RIGHT
+ label: "Place the red vial in position 6 of the left rack."
+-------------------------------------------------------------------------
+ ep | SOURCE (right slot) | blue-vial action
+  1 |     right 1         | place blue vial at right 3
+  2 |     right 3         |
+  3 |     right 4         | (.) MOVE blue vial -> right 5
+  4 |     right 6         |
+  5 |     right 1         | (.) MOVE blue vial -> left 2
+  6 |     right 3         |
+  7 |     right 4         | (.) MOVE blue vial -> left 4
+  8 |     right 6         |
+  9 |     right 1         | (.) MOVE blue vial -> right 1
+ 10 |     right 3         |
+ 11 |     right 4         | (.) MOVE blue vial -> left 3
+ 12 |     right 6         |
+ 13 |     right 1         | (.) MOVE blue vial -> right 4
+
+  lerobot-record $COMMON --dataset.num_episodes=13 --resume=true --robot.cameras="$CAMS" --dataset.single_task="Place the red vial in position 6 of the left rack."
+
+# >>> After Session C: total = 40 episodes. <<<
+
+CHECK COUNT after each session (expect 14, 27, 40):
+  python -c "import json; print('episodes:', json.load(open('/home/robot/my_local_data_v4_new/meta/info.json'))['total_episodes'])"
+
+
+=========================================================================
+ AFTER RECORDING — pipeline to the trainable dataset + pi0.5 retrain
+=========================================================================
+1. [THOR] Upload the new joint dataset:
+   huggingface-cli upload sari-abdan/vial-sort-v4-new /home/robot/my_local_data_v4_new --repo-type dataset
+
+2. [WS] Download + convert joint -> EE (40 new EE episodes):
+   huggingface-cli download sari-abdan/vial-sort-v4-new --repo-type dataset --local-dir ./data/vial-sort-v4-new
+   .venv/bin/python ee/convert_dataset.py --src ./data/vial-sort-v4-new --dst ./data/vial-sort-v4-new-ee --urdf ./SO101/so101_new_calib.urdf
+
+3. [WS] Paraphrase the NEW set ONLY (it still has clean template labels -> regex works;
+   doing this BEFORE the merge avoids crashing on the already-paraphrased 78):
+   .venv/bin/python ee/paraphrase_tasks.py --root ./data/vial-sort-v4-new-ee --repo-id sari-abdan/vial-sort-v4-new-ee
+
+4. [WS] MERGE the 78 (already paraphrased) + 40 (now paraphrased) -> vial-sort-v4-merged-ee:
+   .venv/bin/python ee/merge_v4.py        # expect ~118 episodes
+
+5. [WS] Retrain on pi0.5 (ready to run):
+   bash ee/train_pi05_v4.sh               # pi05 from lerobot/pi05_base, 15k steps, save 1500
+
+6. [WS->THOR] Deploy checkpoints, run vla_server with the FIXED HOME_POSE and
+   --n-action-steps 8-12. Test prompt-following + first-try grasp. Pick by real robot.
+=========================================================================

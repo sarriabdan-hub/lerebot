@@ -1,0 +1,64 @@
+========================================================================
+ THOR PATCH — keep the camera feed continuous during the gripper release
+ (paste this whole file to Claude Code running ON THOR)
+========================================================================
+
+CONTEXT
+The camera feed freezes for ~0.8 s during the bin-drop (and any "Open gripper").
+Reason: the `release_gripper` function in the VLA server sends motor steps but does
+NOT publish camera frames while it runs, so the /observe endpoint keeps returning the
+same buffered frame until the release finishes. The main control loop (`run_command`)
+publishes frames every step; `release_gripper` just needs to do the same.
+
+FILE TO EDIT (on Thor):
+  /home/robot/dev/lerebot/ee/vla_server.py
+  (edit BY HAND — do not scp/overwrite; it has the camera/bus patches.)
+
+WHAT TO DO
+1) Find the function `def release_gripper(` (added by ee/bin_release_patch.md). Inside its
+   loop it does something like:
+
+        for i in range(1, n + 1):
+            if STOP_EVENT.is_set():
+                break
+            a = i / n
+            step = dict(cur)                     # hold every joint where it is
+            step["gripper.pos"] = g0 + (open_val - g0) * a
+            follower.send_action(step)
+            precise_sleep(1.0 / FPS)
+
+2) Add ONE line right after `follower.send_action(step)` so it publishes a fresh frame
+   each step (this is the exact same call `run_command` uses — search the file for
+   `_publish_frames` to confirm the name/signature):
+
+            follower.send_action(step)
+            _publish_frames(follower.get_observation())   # <-- ADD THIS: keep /observe live during the release
+            precise_sleep(1.0 / FPS)
+
+   Notes:
+   - If `_publish_frames` in this file takes the raw observation dict (it does in
+     `run_command`, called as `_publish_frames(obs_raw)`), then `follower.get_observation()`
+     is the right argument.
+   - If reading an observation every step is too heavy, publish every other step:
+         if i % 2 == 0:
+             _publish_frames(follower.get_observation())
+
+3) Save, then restart the VLA server the usual way:
+        pkill -f vla_server.py ; lsof -ti:8000 | xargs -r kill ; sleep 2
+        conda run -n lerobot --no-capture-output \
+          python /home/robot/dev/lerebot/ee/vla_server.py \
+          --checkpoint /home/robot/dev/lerebot/ckpt_pi05_v5_12000 \
+          --n-action-steps 15 --async-chunks \
+          --filter oneeuro --euro-min-cutoff 0.3 --euro-beta 0.02 \
+          --record-video --record-cam cam_wrist --log-file /tmp/vla_pi05_v5.log
+
+VERIFY
+- Run a bin command (or the VIAL SORT). During the gripper open, the side/top/wrist feeds
+  should keep moving instead of freezing.
+- This also smooths cv_run's feed during the release (same root cause).
+
+WHY THIS IS SAFE
+- It only READS an observation and pushes it to the live-frame buffer — no change to motion,
+  no change to the release trajectory, and STOP still halts everything. It just stops the
+  feed from going stale for that ~0.8 s.
+========================================================================

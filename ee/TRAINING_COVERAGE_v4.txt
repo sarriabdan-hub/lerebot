@@ -1,0 +1,59 @@
+=========================================================================
+ VIAL-SORT v4 — TRAINING COVERAGE  (dataset: vial-sort-v4-merged-ee, 118 eps)
+ What the pi05 v4 model actually saw, for knowing how it generalizes.
+ Destination = from episode labels. Source = from the recording structure
+ (source slot is NOT stored in metadata; taken from the recording sheets).
+=========================================================================
+
+ EPISODE INDEX -> DESTINATION + SOURCE
+ ------------------------------------------------------------------------
+ ep   0-17  (18)  dest = RIGHT pos 6 | source = LEFT rack, slots 1-6 (orig v2 Session3 remnant)
+ ep  18-37  (20)  dest = LEFT  pos 1 | source = RIGHT rack, slots 1-6 (orig v2 Session4)
+ ep  38-57  (20)  dest = LEFT  pos 3 | source = RIGHT rack, slots 1-6 (orig v2 Session5)
+ ep  58-77  (20)  dest = LEFT  pos 6 | source = RIGHT rack, slots 1-6 (orig v2 Session6)
+ ep  78-91  (14)  dest = RIGHT pos 6 | source = LEFT rack, slots 1,3,4,6 (v4 new Session A)
+ ep  92-104 (13)  dest = LEFT  pos 1 | source = RIGHT rack, slots 1,3,4,6 (v4 new Session B)
+ ep 105-117 (13)  dest = LEFT  pos 6 | source = RIGHT rack, slots 1,3,4,6 (v4 new Session C)
+
+ PER DESTINATION (total demos)
+ ------------------------------------------------------------------------
+   left  pos 1 : 33   (18-37 + 92-104)
+   left  pos 3 : 20   (38-57)
+   left  pos 6 : 33   (58-77 + 105-117)
+   right pos 6 : 32   (0-17 + 78-91)
+
+ GENERALIZATION MAP
+ ------------------------------------------------------------------------
+ TRAINED PROMPTS (should follow):
+   - "position 1 of the left rack"
+   - "position 3 of the left rack"
+   - "position 6 of the left rack"
+   - "position 6 of the right rack"
+ SOURCE (vial start): both racks, all slots -> grasp generalizes to a vial anywhere.
+ NOT TRAINED:
+   - right pos 1-5  -> UNSEEN (right rack only ever placed at pos 6). Will fail/guess.
+   - left pos 2,4,5 -> never trained, but BETWEEN anchors 1/3/6 -> may interpolate; verify.
+
+ TO EXTEND LATER — the GENERALIZATION PLAN:
+   GOAL: the PROMPT must be able to name EVERY destination position, so record ALL 6
+   destination positions in each rack. The SOURCE is what we keep cheap (anchors only)
+   and let the policy interpolate — exactly how v1 fullft pi0 (100 eps) generalized:
+   trained SOURCE 1/3/4/5, never saw source 2, and handled it correctly on the robot.
+
+   THE PLAN:
+   - SOURCE (vial start): ONLY anchors 1, 3, 4, 6 (vary every episode). The policy
+     interpolates the unseen source slots 2 and 5 — no need to record them.
+   - DESTINATION: record EVERY position 1,2,3,4,5,6 on the OTHER rack, BOTH directions,
+     so a prompt for ANY slot is in the training data (destinations are NOT interpolated):
+         left  pos 1, 2, 3, 4, 5, 6
+         right pos 1, 2, 3, 4, 5, 6
+   - Already have: left 1/3/6 + right 6. GAP to record = left 2,4,5 + right 1,2,3,4,5.
+   - Each destination = one session, source cycling 1,3,4,6 within it. ~30 demos/dest
+     (SO-101+pi0 curve: ~100 eps/task -> ~70%). 12 destinations -> big multi-session record.
+   - Keep paraphrasing. After: convert joint->EE, paraphrase the NEW set, merge into the
+     v4 dataset, retrain pi05 (train_pi05_v4.sh), eval by real-robot prompt-following.
+
+   WHY: every DESTINATION is explicitly trained (so the prompt controls all 6 slots),
+   while the SOURCE generalizes from anchors 1/3/4/6 (the v1-proven interpolation) so you
+   don't have to record sources 2 and 5.
+=========================================================================
