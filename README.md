@@ -34,15 +34,15 @@ hole stays empty — there are no partial or in-between states.
 
 The red vial's starting hole is the only thing that changes during data collection. The
 destination is always right-rack position 3, so the policy learns to generalize over
-*where it picks up* but not *where it places* — a deliberate, contained scope for a first
+_where it picks up_ but not _where it places_ — a deliberate, contained scope for a first
 version.
 
 A subtle but important point drives the whole data-collection design: this project trains
 an **ACT** policy, which conditions only on the camera images and the arm's joint state.
 **It never reads the language prompt.** The task string is stored as dataset metadata, but
 the network doesn't see it during training or inference. So the prompt is a single fixed
-sentence across every session, and the robot learns to find the vial *purely from what the
-cameras show it*. The generalization you get comes from physically varying the vial's start
+sentence across every session, and the robot learns to find the vial _purely from what the
+cameras show it_. The generalization you get comes from physically varying the vial's start
 position across episodes — not from changing any words. (If you later want the prompt to
 actually steer behavior, that calls for a language-conditioned policy such as SmolVLA or
 pi0, not ACT.)
@@ -55,17 +55,17 @@ Place the red vial in position 3 of the right rack.
 
 ## Hardware and scene
 
-| Component | Detail |
-|---|---|
-| Arms | Waveshare SO-101, leader + follower, 6 DOF, STS3215 12V motors |
-| Compute | NVIDIA Jetson AGX Thor, Ubuntu 24.04 (JetPack 7), MAXN |
-| Serial | follower `/dev/ttyACM0`, leader `/dev/ttyACM1` |
-| `cam_top` | Waveshare IMX335 USB, top-down, USB port 4.2.2 |
-| `cam_wrist` | Waveshare IMX335 USB, gripper-mounted, USB port 4.2.4 |
-| `cam_side` | Intel RealSense, 45° side, serial `052622071016` |
+| Component   | Detail                                                         |
+| ----------- | -------------------------------------------------------------- |
+| Arms        | Waveshare SO-101, leader + follower, 6 DOF, STS3215 12V motors |
+| Compute     | NVIDIA Jetson AGX Thor, Ubuntu 24.04 (JetPack 7), MAXN         |
+| Serial      | follower `/dev/ttyACM0`, leader `/dev/ttyACM1`                 |
+| `cam_top`   | Waveshare IMX335 USB, top-down, USB port 4.2.2                 |
+| `cam_wrist` | Waveshare IMX335 USB, gripper-mounted, USB port 4.2.4          |
+| `cam_side`  | Intel RealSense, 45° side, serial `052622071016`               |
 
 The cameras and racks are taped at fixed positions and the lighting is locked, because ACT
-trains on pixels: the scene the cameras see *is* the training distribution, and any drift
+trains on pixels: the scene the cameras see _is_ the training distribution, and any drift
 between recording and inference degrades accuracy. The reference photos below exist so the
 exact scene can be restored if anything is bumped or the rig is rebuilt.
 
@@ -103,7 +103,6 @@ These show each camera's view.
 <p><img src="docs/images/cam_wrist_view.jpg" alt="Wrist camera feed (cam_wrist)" height="350"></p>
 
 <p><img src="docs/images/cam_side_view.jpg" alt="Side camera feed (cam_side)" height="350"></p>
-
 
 The cleanest way to capture the three feed stills is to screenshot the Rerun window during
 a dry run with `--display_data=true`:
@@ -339,6 +338,7 @@ python ee/record.py
 Training runs on the **workstation** (NVIDIA RTX 6000 Ada, 48GB), not on Thor.
 
 **One-time setup on workstation:**
+
 ```bash
 # 1. Install deps
 pip install -e ".[pi0,training]"
@@ -356,12 +356,14 @@ python ee/convert_dataset.py
 ```
 
 **Smoke test (verify no crash, ~5 min):**
+
 ```bash
 bash ee/smoke_test.sh
 # 50 steps, 10 episodes, LoRA rank 16 — checkpoint at outputs/train/smoke_test/
 ```
 
 **Full training (~several hours):**
+
 ```bash
 bash ee/train_pi0_lora.sh
 # 30k steps, batch 8, bfloat16 — checkpoints at outputs/train/vial-sort-pi0-lora/ every 5k steps
@@ -372,14 +374,14 @@ clean exit, checkpoint saved. ✓
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| `Failed to open OpenCVCamera(/dev/videoN)`, then `'NoneType' has no attribute 'is_set'` | raw `/dev/videoN` renumbered; the `is_set` error is just cleanup after the real failure | use the `/dev/v4l/by-path/...` nodes |
-| `failed to set fourcc=MJPG (actual=UYVY)` on a supposed IMX335 | raw node points at the wrong device (UYVY is the RealSense) | use by-path nodes; verify with `ls /dev/v4l/by-path/` |
-| RealSense `Timed out waiting for frame` with all 3 cams | USB bandwidth | `"fourcc": "MJPG"` on the IMX335s, `"warmup_s": 3` on the RealSense |
-| `Permission denied: /dev/ttyACM0` | serial permissions | `sudo chmod 666 /dev/ttyACM*` (or add user to `dialout`) |
-| `Cannot save file into a non-existent directory` | `~` not expanded in `--dataset.root` | use an absolute `/home/robot/...` path |
-| `Repo id must be in the form...` for `policy.path` | relative path | absolute path to `pretrained_model` |
-| `dataset name does not begin with 'eval_'` | inference dataset name | prefix with `eval_` |
-| Resume restarted at episode 0 | wrong repo_id/root or missing flag | keep repo_id and root identical, add `--resume=true` |
-| No checkpoint after training | `save_freq` greater than `steps` | set `--save_freq` ≤ `--steps` |
+| Symptom                                                                                 | Cause                                                                                   | Fix                                                                 |
+| --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `Failed to open OpenCVCamera(/dev/videoN)`, then `'NoneType' has no attribute 'is_set'` | raw `/dev/videoN` renumbered; the `is_set` error is just cleanup after the real failure | use the `/dev/v4l/by-path/...` nodes                                |
+| `failed to set fourcc=MJPG (actual=UYVY)` on a supposed IMX335                          | raw node points at the wrong device (UYVY is the RealSense)                             | use by-path nodes; verify with `ls /dev/v4l/by-path/`               |
+| RealSense `Timed out waiting for frame` with all 3 cams                                 | USB bandwidth                                                                           | `"fourcc": "MJPG"` on the IMX335s, `"warmup_s": 3` on the RealSense |
+| `Permission denied: /dev/ttyACM0`                                                       | serial permissions                                                                      | `sudo chmod 666 /dev/ttyACM*` (or add user to `dialout`)            |
+| `Cannot save file into a non-existent directory`                                        | `~` not expanded in `--dataset.root`                                                    | use an absolute `/home/robot/...` path                              |
+| `Repo id must be in the form...` for `policy.path`                                      | relative path                                                                           | absolute path to `pretrained_model`                                 |
+| `dataset name does not begin with 'eval_'`                                              | inference dataset name                                                                  | prefix with `eval_`                                                 |
+| Resume restarted at episode 0                                                           | wrong repo_id/root or missing flag                                                      | keep repo_id and root identical, add `--resume=true`                |
+| No checkpoint after training                                                            | `save_freq` greater than `steps`                                                        | set `--save_freq` ≤ `--steps`                                       |
